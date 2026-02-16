@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+  {% load static %}
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="{% static 'dist/output.css' %}">
+  <title>{% block title %}CoffeeQual AI{% endblock %}</title>
+</head>
+
+<body class="bg-fs-dif min-h-screen text-text-main">
+  <!-- TOASTS (Django messages) -->
+  {% if messages %}
+    <div id="fs-toast-root" class="fixed inset-0 pointer-events-none z-[9999] grid place-items-start px-4 pt-6">
+      <div class="w-full max-w-md space-y-3 pointer-events-auto">
+        {% for message in messages %}
+          <div class="fs-toast card-fs px-4 py-3 border border-card-border">
+            <div class="flex items-start gap-3">
+              <div class="mt-1 h-2.5 w-2.5 rounded-full"
+                   style="background: {% if message.tags == 'success' %}#22c55e{% elif message.tags == 'error' %}#ef4444{% elif message.tags == 'warning' %}#f59e0b{% else %}#60a5fa{% endif %};">
+              </div>
+              <div class="text-sm">
+                <div class="font-semibold">
+                  {% if message.tags == 'success' %}Éxito
+                  {% elif message.tags == 'error' %}Error
+                  {% elif message.tags == 'warning' %}Aviso
+                  {% else %}Info{% endif %}
+                </div>
+                <div class="text-text-muted">{{ message }}</div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% block content %}{% endblock %}
+
+  <script src="{% static 'js/toast.js' %}" defer></script>
+  <script src="{% static 'js/password_toggle.js' %}" defer></script>
+  <script src="{% static 'js/profile_menu.js' %}"></script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

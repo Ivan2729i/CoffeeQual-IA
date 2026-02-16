@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Registro | CoffeeQual AI{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center px-4">
+  <div class="w-full max-w-md card-fs overflow-hidden">
+    <div class="p-6 sm:p-8">
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-xl bg-card/50 border border-card-border flex items-center justify-center shadow-fs">
+          <span class="font-extrabold" style="color: var(--fs-primary);">CQ</span>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold leading-tight">Crear cuenta</h1>
+          <p class="text-sm text-text-muted">Regístrate para entrar al dashboard.</p>
+        </div>
+      </div>
+
+      <form method="post" class="mt-6 space-y-4">
+        {% csrf_token %}
+
+        <div>
+          <label class="text-sm text-text-muted">User</label>
+          <input name="username" autocomplete="username" class="input-fs mt-2"
+                 placeholder="Tu usuario" required value="{{ username_value|default:'' }}"/>
+        </div>
+
+        <div>
+          <label class="text-sm text-text-muted">Email</label>
+          <input name="email" autocomplete="email" class="input-fs mt-2"
+                 placeholder="correo@ejemplo.com" required value="{{ email_value|default:'' }}"/>
+        </div>
+
+        <div>
+          <label class="text-sm text-text-muted">Password</label>
+
+          <div class="relative mt-2">
+            <input id="register_password" type="password" name="password" autocomplete="new-password"
+              class="input-fs pr-12" placeholder="Mínimo 6 caracteres" required/>
+
+            <button type="button" data-pw-toggle data-target="register_password"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg bg-card/50 border border-card-border flex items-center justify-center hover:brightness-110 transition"
+                    aria-label="Mostrar contraseña">
+              <!-- OJO ABIERTO -->
+              <svg data-icon="open" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                   class="h-5 w-5 hidden" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+
+              <!-- OJO CERRADO -->
+              <svg data-icon="closed" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                   class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 3l18 18"/>
+                <path d="M10.58 10.58A2 2 0 0 0 12 15a3 3 0 0 0 3-3 2 2 0 0 0-4.42-1.42"/>
+                <path d="M9.88 5.09A10.94 10.94 0 0 1 12 5c6.5 0 10 7 10 7a18.3 18.3 0 0 1-4.21 5.06"/>
+                <path d="M6.11 6.11C3.5 8.5 2 12 2 12a18.3 18.3 0 0 0 5 5 10.6 10.6 0 0 0 6 2c1.03 0 2-.12 2.9-.34"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <button class="btn-fs mt-2" type="submit">Register</button>
+      </form>
+
+      <div class="mt-6 pt-5 border-t border-card-border">
+        <p class="text-sm text-text-muted text-center">¿Ya tienes una cuenta? Inicia sesión para continuar.</p>
+        <a href="{% url 'login' %}" class="btn-fs-soft mt-3 text-center">Login</a>
+      </div>
+    </div>
+
+    <div class="px-6 sm:px-8 py-4 border-t border-card-border bg-card/50 text-xs text-text-muted text-center">
+      &copy; {% now "Y" %} CoffeeQual. Todos los derechos reservados.
+    </div>
+  </div>
+</div>
+{% endblock %}

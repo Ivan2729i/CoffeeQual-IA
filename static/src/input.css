@@ -1,0 +1,252 @@
+@import "tailwindcss";
+
+@source "../../templates/**/*.html";
+@source "../../**/templates/**/*.html";
+
+
+/* ============ COFFEEQUAL  ============ */
+:root{
+  /* Base UI azul oscuro */
+  --fs-bg-start: #0b1020;
+  --fs-bg-end:   #070a14;
+
+  --fs-surface:        #121a33;              /* cards */
+  --fs-surface-50:     rgba(18,26,51,.55);   /* glass */
+  --fs-surface-border: rgba(255,255,255,.10);
+
+  --fs-text-main:  #ffffff;
+  --fs-text-muted: rgba(255,255,255,.65);
+
+  /* Acento "café" (botones / brillos) */
+  --fs-primary:        #c79052;   /* café latte */
+  --fs-primary-hover:  #b67b3d;   /* café más oscuro */
+
+  --fs-radius: 16px;
+  --fs-shadow: 0 20px 60px rgba(0,0,0,.55);
+
+  /* Fondo degradado café  */
+  --fs-stop-0:  #05070f;  /* negro azul */
+  --fs-stop-1:  #0b1020;  /* azul oscuro */
+  --fs-stop-2:  #1b1a16;  /* transición a café */
+  --fs-stop-3:  #3a2416;  /* café oscuro */
+  --fs-right-glow: rgba(199,144,82,.42); /* glow café */
+}
+
+/* Tipografía */
+html, body{
+  font-family: "Montserrat", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Fondo degradado general */
+.bg-fs-dif{
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      clamp(700px, 70vw, 1200px) clamp(500px, 55vh, 900px) at 108% 50%,
+      var(--fs-right-glow) 0%,
+      rgba(199,144,82,.22) 38%,
+      rgba(199,144,82,.10) 58%,
+      transparent 72%
+    ),
+    linear-gradient(
+      90deg,
+      var(--fs-stop-0) 0%,
+      var(--fs-stop-1) 32%,
+      var(--fs-stop-2) 64%,
+      var(--fs-stop-3) 100%
+    );
+}
+
+.bg-fs-dif::after{
+  content:"";
+  position:absolute; inset:0; pointer-events:none;
+  background:
+    radial-gradient(1200px 800px at -20% -10%, rgba(0,0,0,.28), transparent 60%),
+    radial-gradient(1000px 700px at 50% 120%, rgba(0,0,0,.22), transparent 60%);
+  mix-blend-mode: multiply;
+}
+
+/* Superficies */
+.bg-card{ background-color: var(--fs-surface); }
+.bg-card\/50{ background-color: var(--fs-surface-50); }
+.border-card-border{ border-color: var(--fs-surface-border); }
+
+/* Texto */
+.text-text-main{ color: var(--fs-text-main); }
+.text-text-muted{ color: var(--fs-text-muted); }
+
+/* Inputs */
+.input-fs{
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: rgba(18,26,51,.65);
+  border: 1px solid var(--fs-surface-border);
+  border-radius: 12px;
+  color: var(--fs-text-main);
+  outline: none;
+  transition: box-shadow .2s, border-color .2s, transform .08s ease;
+}
+.input-fs::placeholder{ color: var(--fs-text-muted); }
+.input-fs:focus{
+  border-color: rgba(199,144,82,.75);
+  box-shadow: 0 0 0 4px rgba(199,144,82,.18);
+}
+
+/* Card glass */
+.card-fs{
+  background: var(--fs-surface-50);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--fs-surface-border);
+  border-radius: 16px;
+  box-shadow: var(--fs-shadow);
+}
+
+/* Botón principal (con animación de brillo) */
+.btn-fs{
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  width: 100%;
+  height: 44px;
+  padding: 0 1.25rem;
+  border-radius: 12px;
+  color: #0b1020;
+  font-weight: 800;
+
+  background-image: linear-gradient(180deg, #e0b27b, var(--fs-primary));
+  border: 1px solid rgba(255,255,255,.10);
+  box-shadow: 0 10px 26px rgba(199,144,82,.32);
+
+  transition: transform .08s ease, filter .2s ease, box-shadow .2s ease, background .2s ease;
+  overflow: hidden;
+}
+.btn-fs:hover{
+  filter: brightness(1.04);
+  box-shadow: 0 14px 30px rgba(199,144,82,.42);
+}
+.btn-fs:active{ transform: translateY(1px); }
+
+/* Brillo deslizante */
+.btn-fs::after{
+  content:"";
+  position:absolute;
+  top:0; left:-120%;
+  width:60%; height:100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.40), transparent);
+  transform: skewX(-20deg);
+}
+.btn-fs:hover::after{
+  left: 120%;
+  transition: left .8s ease;
+}
+
+/* Outline */
+.btn-fs-outline{
+  position: relative;
+  display: inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:.5rem;
+  width: 100%;
+  height: 44px;
+  padding: 0 1.25rem;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--fs-text-main);
+  border: 2px solid rgba(255,255,255,.75);
+  transition: color .2s ease, background .2s ease, transform .08s ease, box-shadow .2s ease;
+  overflow: hidden;
+}
+.btn-fs-outline:hover{
+  background: rgba(255,255,255,.92);
+  color: #0b1020;
+  box-shadow: 0 10px 24px rgba(0,0,0,.30);
+}
+.btn-fs-outline:active{ transform: translateY(1px); }
+
+.btn-fs-outline::after{
+  content:"";
+  position:absolute;
+  top:0; left:-120%;
+  width:60%; height:100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent);
+  transform: skewX(-20deg);
+}
+.btn-fs-outline:hover::after{
+  left:120%;
+  transition:left .8s ease;
+}
+
+/* Link underline animado (con acento café) */
+.link-underline{
+  position: relative; text-decoration: none; color: var(--fs-text-muted);
+  transition: color .2s ease, letter-spacing .2s ease;
+}
+.link-underline::after{
+  content:""; position:absolute; left:0; bottom:-2px; height:2px; width:0;
+  background: var(--fs-primary); transition: width .25s ease;
+}
+.link-underline:hover{ color:#fff; letter-spacing:.3px; }
+.link-underline:hover::after{ width:100%; }
+
+/* Botón secundario con MISMA animación (brillo) pero estilo suave/outline */
+.btn-fs-soft{
+  position: relative;
+  display: inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:.5rem;
+  width: 100%;
+  height: 44px;
+  padding: 0 1.25rem;
+  border-radius: 12px;
+  font-weight: 800;
+
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.18);
+  color: var(--fs-text-main);
+
+  box-shadow: 0 10px 24px rgba(0,0,0,.22);
+  transition: transform .08s ease, filter .2s ease, box-shadow .2s ease, background .2s ease;
+  overflow: hidden;
+}
+.btn-fs-soft:hover{
+  background: rgba(255,255,255,.10);
+  box-shadow: 0 14px 30px rgba(0,0,0,.28);
+}
+.btn-fs-soft:active{ transform: translateY(1px); }
+
+/* Brillo deslizante igual que btn-fs */
+.btn-fs-soft::after{
+  content:"";
+  position:absolute;
+  top:0; left:-120%;
+  width:60%; height:100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.28), transparent);
+  transform: skewX(-20deg);
+}
+.btn-fs-soft:hover::after{
+  left:120%;
+  transition:left .8s ease;
+}
+
+.fs-toast{
+  animation: fsToastIn .22s ease-out both;
+}
+@keyframes fsToastIn{
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.fs-toast.hide{
+  animation: fsToastOut .22s ease-in both;
+}
+@keyframes fsToastOut{
+  to { transform: translateY(-8px); opacity: 0; }
+}
+
