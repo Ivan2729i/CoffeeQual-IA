@@ -1,0 +1,90 @@
+<div class="mt-6 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 max-w-5xl">
+
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <h3 class="text-lg font-semibold text-gray-800">Proveedores</h3>
+      <p class="text-sm text-gray-500 mt-1">
+        Administra proveedores para asociarlos a lotes.
+      </p>
+    </div>
+
+    <a href="{% url 'dashboard:settings' %}"
+       class="text-sm font-semibold text-[#6b4b2a] hover:underline">
+      Volver
+    </a>
+  </div>
+
+  <!-- Crear proveedor -->
+  <div class="mt-6 rounded-2xl bg-[#fbf7f2] p-5 border border-[#eadfd3]">
+    <h4 class="text-sm font-semibold text-[#2b1d16]">Agregar proveedor</h4>
+
+    <form method="post" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+      {% csrf_token %}
+
+      <div>
+        <label class="text-xs font-semibold text-gray-700">Nombre(s)</label>
+        <div class="mt-1">{{ form.first_name }}</div>
+        {% if form.first_name.errors %}
+          <p class="text-xs text-red-600 mt-1">{{ form.first_name.errors|striptags }}</p>
+        {% endif %}
+      </div>
+
+      <div>
+        <label class="text-xs font-semibold text-gray-700">Apellidos</label>
+        <div class="mt-1">{{ form.last_name }}</div>
+        {% if form.last_name.errors %}
+          <p class="text-xs text-red-600 mt-1">{{ form.last_name.errors|striptags }}</p>
+        {% endif %}
+      </div>
+
+      <div>
+        <label class="text-xs font-semibold text-gray-700">Contacto</label>
+        <div class="mt-1">{{ form.contact }}</div>
+        {% if form.contact.errors %}
+          <p class="text-xs text-red-600 mt-1">{{ form.contact.errors|striptags }}</p>
+        {% endif %}
+      </div>
+
+      <div class="md:col-span-3 flex justify-end">
+        <button type="submit"
+                class="btn-shine inline-flex items-center justify-center px-4 py-2 rounded-lg
+                       bg-[#6b4b2a] text-white text-sm font-semibold hover:bg-[#5a3f23]">
+          Guardar proveedor
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Lista -->
+  <div class="mt-6">
+    <h4 class="text-sm font-semibold text-[#2b1d16]">Lista de proveedores</h4>
+
+    <div class="mt-3 overflow-x-auto rounded-2xl border border-gray-200">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="text-left p-3 font-semibold text-gray-700">Nombre</th>
+            <th class="text-left p-3 font-semibold text-gray-700">Contacto</th>
+            <th class="text-left p-3 font-semibold text-gray-700">Creado</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white">
+          {% for p in providers %}
+          <tr class="border-t">
+            <td class="p-3 text-gray-800">{{ p.first_name }} {{ p.last_name }}</td>
+            <td class="p-3 text-gray-700">{{ p.contact }}</td>
+            <td class="p-3 text-gray-500">{{ p.created_at|date:"Y-m-d H:i" }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td class="p-4 text-gray-500" colspan="3">
+              Aún no hay proveedores. Crea el primero arriba.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
