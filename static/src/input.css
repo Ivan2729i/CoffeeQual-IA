@@ -250,3 +250,59 @@ html, body{
   to { transform: translateY(-8px); opacity: 0; }
 }
 
+/* Scrollbar bonito */
+.scrollbar-soft::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scrollbar-soft::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-soft::-webkit-scrollbar-thumb {
+  background: rgba(107, 75, 42, 0.28);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+.scrollbar-soft::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 75, 42, 0.42);
+}
+
+/* Firefox */
+.scrollbar-soft {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(107, 75, 42, 0.35) transparent;
+}
+
+/* ===== Efecto brillo reutilizable ===== */
+.btn-shine{
+  position: relative;
+  overflow: hidden;
+  isolation: isolate; /* el brillo no se sale */
+}
+
+.btn-shine::after{
+  content:"";
+  position:absolute;
+  top:0; left:-120%;
+  width:60%; height:100%;
+  pointer-events:none;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.40), transparent);
+  transform: skewX(-20deg);
+  opacity: 0;
+  z-index: 0;
+}
+
+.btn-shine:hover::after{
+  left:120%;
+  opacity: 1;
+  transition: left .8s ease, opacity .2s ease;
+}
+
+.btn-shine > *{
+  position: relative;
+  z-index: 1;
+}

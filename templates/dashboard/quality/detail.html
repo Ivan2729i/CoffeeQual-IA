@@ -1,0 +1,161 @@
+{% load static %}
+
+<div class="mt-6 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 max-w-5xl">
+
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <h3 class="text-lg font-semibold text-gray-800">Lote {{ batch.code }}</h3>
+      <p class="text-sm text-gray-500 mt-1">
+        Proveedor: <span class="font-semibold text-gray-700">{{ batch.provider }}</span> ·
+        Peso: <span class="font-semibold text-gray-700">{{ batch.weight_kg }} kg</span>
+      </p>
+    </div>
+
+    <a href="{% url 'dashboard:quality' %}"
+       class="text-sm font-semibold text-[#6b4b2a] hover:underline">
+      Volver
+    </a>
+  </div>
+
+  {% if evaluation %}
+    <div class="mt-6 rounded-2xl bg-green-50 border border-green-200 p-5" id="qaEvaluatedBox">
+      <p class="text-sm font-semibold text-green-800">Este lote ya fue evaluado</p>
+
+      <div class="mt-3 grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div class="rounded-xl bg-white p-3 border border-green-200">
+          <p class="text-xs text-gray-500">Grado</p>
+          <p class="text-lg font-bold text-gray-800">{{ evaluation.grade|default:"-" }}</p>
+        </div>
+        <div class="rounded-xl bg-white p-3 border border-green-200">
+          <p class="text-xs text-gray-500">Primarios</p>
+          <p class="text-lg font-bold text-gray-800">{{ evaluation.primary_total }}</p>
+        </div>
+        <div class="rounded-xl bg-white p-3 border border-green-200">
+          <p class="text-xs text-gray-500">Secundarios</p>
+          <p class="text-lg font-bold text-gray-800">{{ evaluation.secondary_total }}</p>
+        </div>
+        <div class="rounded-xl bg-white p-3 border border-green-200">
+          <p class="text-xs text-gray-500">Total</p>
+          <p class="text-lg font-bold text-gray-800">{{ evaluation.defects_total }}</p>
+        </div>
+      </div>
+
+      {# ===== DESGLOSE ===== #}
+      {% with p=evaluation.counts.primary s=evaluation.counts.secondary %}
+        <div class="mt-6">
+          <p class="text-sm font-semibold text-gray-800">Conteo por defecto</p>
+
+          <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Primarios -->
+            <div class="rounded-2xl bg-white border border-green-200 p-4">
+              <p class="text-xs font-semibold text-gray-700">Primarios</p>
+              <div class="mt-3 grid grid-cols-2 gap-2">
+                {% if p %}
+                  {% for name, qty in p.items %}
+                    <div class="rounded-xl bg-[#f7f2ec] p-3 border border-[#eadfd3]">
+                      <p class="text-[11px] text-gray-500">{{ name }}</p>
+                      <p class="text-sm font-bold text-gray-800">{{ qty }}</p>
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="text-xs text-gray-500 col-span-2">Sin defectos primarios.</p>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Secundarios -->
+            <div class="rounded-2xl bg-white border border-green-200 p-4">
+              <p class="text-xs font-semibold text-gray-700">Secundarios</p>
+              <div class="mt-3 grid grid-cols-2 gap-2">
+                {% if s %}
+                  {% for name, qty in s.items %}
+                    <div class="rounded-xl bg-[#f7f2ec] p-3 border border-[#eadfd3]">
+                      <p class="text-[11px] text-gray-500">{{ name }}</p>
+                      <p class="text-sm font-bold text-gray-800">{{ qty }}</p>
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <p class="text-xs text-gray-500 col-span-2">Sin defectos secundarios.</p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      {% endwith %}
+    </div>
+
+  {% else %}
+    <div id="qaDraftBox" class="mt-6 rounded-2xl bg-[#fbf7f2] border border-[#eadfd3] p-5">
+      <p class="text-sm font-semibold text-[#2b1d16]">Evaluar lote</p>
+      <p class="text-xs text-gray-500 mt-1">
+        Elige el método: subir imagen o evaluación en vivo (cámara).
+      </p>
+
+      <!-- Tabs -->
+      <div class="mt-4 inline-flex rounded-xl border border-[#eadfd3] bg-white overflow-hidden">
+        <button type="button" id="qaTabImage"
+                class="px-4 py-2 text-sm font-semibold text-[#2b1d16] bg-[#f5efe7]">
+          Imagen
+        </button>
+        <button type="button" id="qaTabLive"
+                class="px-4 py-2 text-sm font-semibold text-[#2b1d16] hover:bg-[#f5efe7]">
+          En vivo
+        </button>
+      </div>
+
+      <!-- Panel Imagen -->
+      <div id="qaPanelImage" class="mt-4">
+        <input type="hidden" id="qaUrl" value="{% url 'dashboard:quality_evaluate' %}">
+        <input type="hidden" id="qaBatchId" value="{{ batch.id }}">
+
+        <form id="qaForm" class="space-y-3">
+          {% csrf_token %}
+          <input id="qaFile" name="image" type="file" accept="image/*"
+                 class="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-4
+                        file:rounded-lg file:border-0 file:text-sm file:font-semibold
+                        file:bg-[#f5efe7] file:text-[#6b4b2a] hover:file:bg-[#efe4d6]"/>
+
+          <button id="qaBtn" type="submit"
+                  class="btn-shine inline-flex items-center justify-center px-4 py-2 rounded-lg
+                         bg-[#6b4b2a] text-white text-sm font-semibold hover:bg-[#5a3f23]
+                         disabled:opacity-60 disabled:cursor-not-allowed">
+            Evaluar y guardar
+          </button>
+        </form>
+
+        <div id="qaStatus" class="mt-4 text-sm text-gray-700 hidden"></div>
+        <div id="qaResult" class="mt-6 hidden"></div>
+      </div>
+
+      <!-- Panel En vivo -->
+      <div id="qaPanelLive" class="mt-4 hidden">
+        <div class="rounded-2xl bg-white border border-[#eadfd3] p-5">
+          <p class="text-sm font-semibold text-[#2b1d16]">Evaluación en vivo (cámara)</p>
+          <p class="text-xs text-gray-500 mt-1">
+            Preview de cámara + conteo en tiempo real.
+          </p>
+
+          <div class="mt-4 flex gap-3">
+            <button type="button" id="qaLiveStart"
+                    class="px-4 py-2 rounded-lg bg-[#6b4b2a] text-white text-sm font-semibold hover:bg-[#5a3f23] opacity-60 cursor-not-allowed"
+                    disabled>
+              Iniciar en vivo
+            </button>
+
+            <button type="button" id="qaLiveStop"
+                    class="px-4 py-2 rounded-lg border border-[#eadfd3] text-sm font-semibold text-[#2b1d16] opacity-60 cursor-not-allowed"
+                    disabled>
+              Detener
+            </button>
+          </div>
+
+          <div class="mt-4 rounded-xl bg-[#fbf7f2] border border-[#eadfd3] p-4 text-xs text-gray-600">
+            Streaming + detección en vivo (cámaras físicas).
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  {% endif %}
+</div>

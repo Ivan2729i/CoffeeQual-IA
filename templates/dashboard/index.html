@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}{{ page_title|default:"Dashboard" }} | CoffeeQual AI{% endblock %}
 
 {% block content %}
@@ -174,9 +175,56 @@
     <h2 class="text-2xl font-bold text-[#2b1d16]">{{ page_title|default:"Dashboard" }}</h2>
 
     <div class="mt-4">
-      <!-- Aquí irá el contenido de cada sección -->
+      {% if active == "quality" %}
+        {% if quality_section == "detail" %}
+          {% include "dashboard/quality/detail.html" %}
+        {% else %}
+          {% include "dashboard/quality/home.html" %}
+        {% endif %}
+
+      {% elif active == "settings" %}
+        {% if settings_section == "providers" %}
+          {% include "dashboard/settings/providers.html" %}
+        {% else %}
+          <div class="mt-6 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 max-w-3xl">
+            <h3 class="text-lg font-semibold text-gray-800">System settings</h3>
+            <p class="text-sm text-gray-500 mt-1">
+              Configuración general del sistema.
+            </p>
+
+            <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <a href="{% url 'dashboard:settings_providers' %}"
+                 class="group rounded-2xl border border-[#eadfd3] bg-[#fbf7f2] p-5 hover:border-[#c0895e] transition">
+                <p class="text-sm font-semibold text-[#2b1d16] group-hover:text-[#6b4b2a]">
+                  Proveedores
+                </p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Alta y listado de proveedores para lotes.
+                </p>
+              </a>
+            </div>
+          </div>
+        {% endif %}
+
+      {% else %}
+        <!-- Placeholder opcional para otras secciones -->
+        <div class="text-sm text-gray-500">
+          Selecciona una opción del menú para ver su contenido.
+        </div>
+      {% endif %}
     </div>
-  </main>
+    </main>
 
 </div>
 {% endblock %}
+
+{% block page_scripts %}
+  {% if active == "quality" and quality_section == "home" %}
+    <script src="{% static 'js/quality_assessment.js' %}"></script>
+  {% endif %}
+
+  {% if active == "quality" and quality_section == "detail" %}
+    <script src="{% static 'js/quality_detail.js' %}"></script>
+  {% endif %}
+{% endblock %}
+
