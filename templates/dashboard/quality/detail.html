@@ -62,7 +62,6 @@
                 {% endif %}
               </div>
             </div>
-
             <!-- Secundarios -->
             <div class="rounded-2xl bg-white border border-green-200 p-4">
               <p class="text-xs font-semibold text-gray-700">Secundarios</p>
@@ -90,19 +89,19 @@
       <p class="text-xs text-gray-500 mt-1">
         Elige el método: subir imagen o evaluación en vivo (cámara).
       </p>
-
       <!-- Tabs -->
       <div class="mt-4 inline-flex rounded-xl border border-[#eadfd3] bg-white overflow-hidden">
         <button type="button" id="qaTabImage"
-                class="px-4 py-2 text-sm font-semibold text-[#2b1d16] bg-[#f5efe7]">
+                class="px-4 py-2 text-sm font-semibold text-[#2b1d16] bg-[#f5efe7] cursor-pointer">
+
+
           Imagen
         </button>
         <button type="button" id="qaTabLive"
-                class="px-4 py-2 text-sm font-semibold text-[#2b1d16] hover:bg-[#f5efe7]">
+                class="px-4 py-2 text-sm font-semibold text-[#2b1d16] hover:bg-[#f5efe7] cursor-pointer">
           En vivo
         </button>
       </div>
-
       <!-- Panel Imagen -->
       <div id="qaPanelImage" class="mt-4">
         <input type="hidden" id="qaUrl" value="{% url 'dashboard:quality_evaluate' %}">
@@ -116,7 +115,7 @@
                         file:bg-[#f5efe7] file:text-[#6b4b2a] hover:file:bg-[#efe4d6]"/>
 
           <button id="qaBtn" type="submit"
-                  class="btn-shine inline-flex items-center justify-center px-4 py-2 rounded-lg
+                  class="btn-shine inline-flex items-center justify-center px-4 py-2 rounded-lg cursor-pointer
                          bg-[#6b4b2a] text-white text-sm font-semibold hover:bg-[#5a3f23]
                          disabled:opacity-60 disabled:cursor-not-allowed">
             Evaluar y guardar
@@ -126,7 +125,6 @@
         <div id="qaStatus" class="mt-4 text-sm text-gray-700 hidden"></div>
         <div id="qaResult" class="mt-6 hidden"></div>
       </div>
-
       <!-- Panel En vivo -->
       <div id="qaPanelLive" class="mt-4 hidden">
         <div class="rounded-2xl bg-white border border-[#eadfd3] p-5">
