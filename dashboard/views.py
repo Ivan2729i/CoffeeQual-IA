@@ -223,7 +223,6 @@ def evaluate_image(request):
 
         # IA
         res = analyze_image(tmp_path, conf=0.25)
-        print("IA RES:", res)  # <- verás esto en la consola del servidor
 
         if not isinstance(res, dict):
             return JsonResponse({"ok": False, "error": "Respuesta inválida del modelo."}, status=500)

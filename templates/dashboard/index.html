@@ -151,7 +151,7 @@
              class="hidden absolute bottom-12 right-2 w-48 rounded-xl bg-[#241611] border border-white/10 shadow-xl overflow-hidden z-50">
 
           <a href="#"
-             class="block px-4 py-3 text-sm text-[#f1e7de] hover:bg-white/5">
+             class="block px-4 py-3 text-sm text-[#f1e7de] hover:bg-white/5 cursor-pointer">
             Editar perfil
           </a>
 
@@ -160,7 +160,7 @@
           <form method="post" action="{% url 'logout' %}">
             {% csrf_token %}
             <button type="submit"
-                    class="w-full text-left px-4 py-3 text-sm text-[#f1e7de] hover:bg-white/5">
+                    class="cursor-pointer w-full text-left px-4 py-3 text-sm text-[#f1e7de] hover:bg-white/5">
               Cerrar sesión
             </button>
           </form>
@@ -187,7 +187,7 @@
           {% include "dashboard/settings/providers.html" %}
         {% else %}
           <div class="mt-6 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 max-w-3xl">
-            <h3 class="text-lg font-semibold text-gray-800">System settings</h3>
+            <h3 class="text-lg font-semibold text-gray-800">Settings</h3>
             <p class="text-sm text-gray-500 mt-1">
               Configuración general del sistema.
             </p>

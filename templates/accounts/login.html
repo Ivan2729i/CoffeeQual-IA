@@ -32,7 +32,7 @@
                    class="input-fs pr-12" placeholder="••••••••" required/>
 
             <button type="button" data-pw-toggle data-target="login_password"
-                    class="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg bg-card/50 border border-card-border flex items-center justify-center hover:brightness-110 transition"
+                    class="cursor-pointer absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg bg-card/50 border border-card-border flex items-center justify-center hover:brightness-110 transition"
                     aria-label="Mostrar contraseña">
               <!-- OJO ABIERTO -->
               <svg data-icon="open" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -57,7 +57,7 @@
           <a href="{% url 'password_reset' %}" class="link-underline text-sm">¿Olvidaste tu contraseña?</a>
         </div>
 
-        <button class="btn-fs mt-2" type="submit">Login</button>
+        <button class="btn-fs mt-2 cursor-pointer" type="submit">Login</button>
       </form>
 
       <div class="mt-6 pt-5 border-t border-card-border">
