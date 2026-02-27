@@ -6,6 +6,7 @@ app_name = "dashboard"
 
 urlpatterns = [
     path("", views.dashboard_view, name="dashboard"),
+    path("api/dashboard/summary/", views.dashboard_summary_api, name="summary_api"),
     path("camera/", views.camera_view, name="camera"),
     path("camera/stream/<str:cam_id>/", views.camera_stream, name="camera_stream"),
     path("live/start/", views.live_start, name="live_start"),

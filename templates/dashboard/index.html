@@ -175,16 +175,44 @@
     <h2 class="text-2xl font-bold text-[#2b1d16]">{{ page_title|default:"Dashboard" }}</h2>
 
     <div class="mt-4">
-      {% if active == "quality" %}
+
+      {# DASHBOARD #}
+      {% if active == "dashboard" %}
+        {% include "dashboard/dashboard/home.html" %}
+
+      {# CAMERA MONITORING #}
+      {% elif active == "camera" %}
+        {% include "dashboard/camera/home.html" %}
+
+      {# QUALITY ASSESSMENT #}
+      {% elif active == "quality" %}
         {% if quality_section == "detail" %}
           {% include "dashboard/quality/detail.html" %}
         {% else %}
           {% include "dashboard/quality/home.html" %}
         {% endif %}
 
-      {% elif active == "camera" %}
-        {% include "dashboard/camera/home.html" %}
+      {# BATCH METRICS #}
+      {% elif active == "batch" %}
+        {% include "dashboard/batch/home.html" %}
 
+      {# PACKAGING AND DISTRIBUTION #}
+      {% elif active == "packaging" %}
+        {% include "dashboard/packaging/home.html" %}
+
+      {# ACTIVITY LOG #}
+      {% elif active == "activity" %}
+        {% include "dashboard/activity/home.html" %}
+
+      {# REPORT GENERATION #}
+      {% elif active == "reports" %}
+        {% include "dashboard/reports/home.html" %}
+
+      {# ALERTS AND NOTIFICATIONS #}
+      {% elif active == "alerts" %}
+        {% include "dashboard/alerts/home.html" %}
+
+      {# SYSTEM SETTINGS #}
       {% elif active == "settings" %}
         {% if settings_section == "providers" %}
           {% include "dashboard/settings/providers.html" %}
@@ -209,14 +237,14 @@
           </div>
         {% endif %}
 
+      {# FALLBACK #}
       {% else %}
-        <!-- Placeholder opcional para otras secciones -->
         <div class="text-sm text-gray-500">
           Selecciona una opción del menú para ver su contenido.
         </div>
       {% endif %}
     </div>
-    </main>
+  </main>
 
 </div>
 {% endblock %}

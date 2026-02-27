@@ -1,0 +1,121 @@
+{% load static %}
+
+<div class="p-6">
+  <!-- TARJETA CONTENEDORA CON SCROLL -->
+  <div class="rounded-3xl border border-zinc-200 bg-white/55 backdrop-blur shadow-sm">
+    <div class="max-h-[calc(100vh-140px)] overflow-y-auto p-6 space-y-6">
+
+      <!-- Header -->
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h1 class="text-2xl font-semibold tracking-tight text-zinc-900">
+            Resumen global del sistema
+          </h1>
+        </div>
+
+        <div class="hidden md:flex items-center gap-2">
+          <span class="text-xs text-zinc-500">Actualización:</span>
+          <span id="lastUpdated"
+                class="text-xs font-medium text-zinc-700 bg-white/70 border border-zinc-200 rounded-full px-3 py-1">
+            —
+          </span>
+        </div>
+      </div>
+
+      <!-- Root para el JS -->
+      <div id="dashboardRoot" data-summary-url="{% url 'dashboard:summary_api' %}"></div>
+
+      <!-- KPI Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" id="kpiRow">
+        <div class="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Lotes evaluados</div>
+          <div class="mt-2 text-2xl font-semibold text-zinc-900" id="kpiLots">—</div>
+          <div class="mt-1 text-xs text-zinc-500">Total histórico</div>
+        </div>
+
+        <div class="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">KG procesados</div>
+          <div class="mt-2 text-2xl font-semibold text-zinc-900" id="kpiKg">—</div>
+          <div class="mt-1 text-xs text-zinc-500">Suma de lotes evaluados</div>
+        </div>
+
+        <div class="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Calidad general</div>
+          <div class="mt-2 text-2xl font-semibold text-zinc-900" id="kpiQuality">—</div>
+          <div class="mt-1 text-xs text-zinc-500">% aceptación Grado 1–2</div>
+        </div>
+
+        <div class="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">% Rechazo</div>
+          <div class="mt-2 text-2xl font-semibold text-zinc-900" id="kpiReject">—</div>
+          <div class="mt-1 text-xs text-zinc-500">Total de evaluados Grado 4 </div>
+        </div>
+      </div>
+
+      <!-- Data state -->
+      <div id="noDataBox" class="hidden rounded-2xl border border-zinc-200 bg-white/70 p-6 shadow-sm">
+        <h3 class="text-lg font-semibold text-zinc-900">Aún no hay datos para mostrar</h3>
+        <p class="mt-1 text-sm text-zinc-600">
+          Evalúa al menos un lote para que el dashboard genere métricas, comparativas y gráficas.
+        </p>
+      </div>
+
+      <!-- Charts -->
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div class="rounded-2xl border border-zinc-200 bg-white/70 p-5 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold text-zinc-900">Lotes evaluados por mes</h3>
+            <span class="text-xs text-zinc-500" id="yearLabel1">—</span>
+          </div>
+
+          <!-- ALTURA FIJA -->
+          <div class="mt-3 h-[340px]">
+            <canvas id="chartLots" class="w-full h-full"></canvas>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-zinc-200 bg-white/70 p-5 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold text-zinc-900">KG procesados por mes</h3>
+            <span class="text-xs text-zinc-500" id="yearLabel2">—</span>
+          </div>
+
+          <div class="mt-3 h-[340px]">
+            <canvas id="chartKg" class="w-full h-full"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold text-zinc-900">Calidad general del café</h3>
+            <span class="text-xs text-zinc-500">Aceptación Grado 1–2</span>
+          </div>
+
+          <div class="mt-4 flex items-center justify-center">
+            <div class="w-full max-w-md">
+              <canvas id="chartGauge"></canvas>
+            </div>
+          </div>
+
+          <p class="mt-2 text-xs text-zinc-600">
+            Calidad de lotes evaluados de Grado 1–2
+          </p>
+        </div>
+
+        <div class="rounded-2xl border border-zinc-200 bg-white/70 p-4 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold text-zinc-900">Comparación mes actual vs anterior</h3>
+            <span class="text-xs text-zinc-500" id="compareTitle">—</span>
+          </div>
+
+          <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3" id="compareCards"></div>
+
+          <p class="mt-2 text-xs text-zinc-600">Comparación por mes del año actual.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>

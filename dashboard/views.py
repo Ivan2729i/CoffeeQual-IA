@@ -11,7 +11,6 @@ from django.views.decorators.http import require_http_methods
 from django.db import transaction
 from .models import Batch, Provider, Evaluation
 from .forms import ProviderForm, BatchCreateForm
-
 from django.http import StreamingHttpResponse
 import cv2
 import time
@@ -19,6 +18,13 @@ from django.http import StreamingHttpResponse
 from django.core.cache import cache
 import time
 from inference.live_session import LiveEvalSession
+
+from dataclasses import dataclass
+from datetime import date
+from typing import Dict, List
+from django.db.models import Count, Sum, IntegerField, Case, When
+from django.db.models.functions import TruncMonth
+from django.utils import timezone
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -565,3 +571,140 @@ def live_save(request):
     })
 
 # ===== Fin: Quality/Live sessions Camera =====
+
+# ===== Inicio: Graficas Dashboard =====
+
+MONTH_NAMES_ES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+
+
+def _safe_pct(num: float, den: float) -> float:
+    if den <= 0:
+        return 0.0
+    return round((num / den) * 100.0, 2)
+
+
+def _year_month_bounds(year: int, month: int) -> tuple[date, date]:
+    # inicio mes, inicio mes siguiente
+    start = date(year, month, 1)
+    if month == 12:
+        end = date(year + 1, 1, 1)
+    else:
+        end = date(year, month + 1, 1)
+    return start, end
+
+
+def dashboard_summary_api(request):
+    now = timezone.localtime(timezone.now())
+    year = now.year
+    current_month = now.month
+    prev_month = current_month - 1 if current_month > 1 else 12
+    prev_year = year if current_month > 1 else year - 1
+
+    # ========= 1) Series por mes =========
+    monthly_qs = (
+        Evaluation.objects
+        .filter(created_at__year=year)
+        .annotate(month=TruncMonth("created_at"))
+        .values("month")
+        .annotate(
+            lots=Count("id"),
+            kg=Sum("batch__weight_kg"),
+            accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+            total=Count("id"),
+        )
+        .order_by("month")
+    )
+
+    # Rellenar meses faltantes (1..12) con 0
+    lots_by_month = {m: 0 for m in range(1, 13)}
+    kg_by_month = {m: 0.0 for m in range(1, 13)}
+    acc_by_month = {m: 0 for m in range(1, 13)}
+    total_by_month = {m: 0 for m in range(1, 13)}
+
+    for row in monthly_qs:
+        month_num = row["month"].month
+        lots_by_month[month_num] = int(row["lots"] or 0)
+        kg_by_month[month_num] = float(row["kg"] or 0.0)
+        acc_by_month[month_num] = int(row["accepted"] or 0)
+        total_by_month[month_num] = int(row["total"] or 0)
+
+    labels = MONTH_NAMES_ES
+    lots_series = [lots_by_month[m] for m in range(1, 13)]
+    kg_series = [round(kg_by_month[m], 2) for m in range(1, 13)]
+
+    # ========= 2) KPIs globales =========
+    global_qs = Evaluation.objects.all().aggregate(
+        total_lots=Count("id"),
+        total_kg=Sum("batch__weight_kg"),
+        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+        rejected=Count(Case(When(grade=4, then=1), output_field=IntegerField())),
+    )
+
+    total_lots = int(global_qs["total_lots"] or 0)
+    total_kg = float(global_qs["total_kg"] or 0.0)
+    accepted = int(global_qs["accepted"] or 0)
+    rejected = int(global_qs["rejected"] or 0)
+
+    quality_pct = _safe_pct(accepted, total_lots)
+    reject_pct = _safe_pct(rejected, total_lots)
+
+    # ========= 3) Comparativa mes actual vs anterior =========
+    cur_start, cur_end = _year_month_bounds(year, current_month)
+    prev_start, prev_end = _year_month_bounds(prev_year, prev_month)
+
+    cur = Evaluation.objects.filter(created_at__date__gte=cur_start, created_at__date__lt=cur_end).aggregate(
+        lots=Count("id"),
+        kg=Sum("batch__weight_kg"),
+        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+    )
+    prev = Evaluation.objects.filter(created_at__date__gte=prev_start, created_at__date__lt=prev_end).aggregate(
+        lots=Count("id"),
+        kg=Sum("batch__weight_kg"),
+        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+    )
+
+    cur_lots = int(cur["lots"] or 0)
+    prev_lots = int(prev["lots"] or 0)
+
+    cur_kg = float(cur["kg"] or 0.0)
+    prev_kg = float(prev["kg"] or 0.0)
+
+    cur_quality = _safe_pct(int(cur["accepted"] or 0), cur_lots)
+    prev_quality = _safe_pct(int(prev["accepted"] or 0), prev_lots)
+
+    def delta_pct(cur_val: float, prev_val: float) -> float:
+        if prev_val == 0:
+            return 0.0 if cur_val == 0 else 100.0
+        return round(((cur_val - prev_val) / prev_val) * 100.0, 2)
+
+    comparison = {
+        "current": {"year": year, "month": current_month},
+        "previous": {"year": prev_year, "month": prev_month},
+        "lots": {"current": cur_lots, "previous": prev_lots, "delta_pct": delta_pct(cur_lots, prev_lots)},
+        "kg": {"current": round(cur_kg, 2), "previous": round(prev_kg, 2), "delta_pct": delta_pct(cur_kg, prev_kg)},
+        "quality": {
+            "current": cur_quality,
+            "previous": prev_quality,
+            "delta_points": round(cur_quality - prev_quality, 2),
+        },
+    }
+
+    payload = {
+        "year": year,
+        "has_data": total_lots > 0,
+        "kpis": {
+            "total_lots": total_lots,
+            "total_kg": round(total_kg, 2),
+            "quality_pct": quality_pct,
+            "reject_pct": reject_pct,
+        },
+        "charts": {
+            "labels": labels,
+            "lots_by_month": lots_series,
+            "kg_by_month": kg_series,
+        },
+        "comparison": comparison,
+    }
+    return JsonResponse(payload)
+
+# ===== Fin: Graficas Dashboard =====
