@@ -1,0 +1,78 @@
+{% load static %}
+
+<input type="hidden" id="qaLiveBatchId" value="{{ batch.id }}">
+<input type="hidden" id="qaLiveCamId" value="cam1">
+<input type="hidden" id="qaLiveUrlStart" value="{% url 'dashboard:live_start' %}">
+<input type="hidden" id="qaLiveUrlStop" value="{% url 'dashboard:live_stop' %}">
+<input type="hidden" id="qaLiveUrlSave" value="{% url 'dashboard:live_save' %}">
+<input type="hidden" id="qaLiveUrlStatus" value="{% url 'dashboard:live_status' %}">
+<input type="hidden" id="qaLivePreviewUrl" value="{% url 'dashboard:camera_stream' 'cam1' %}">
+<input type="hidden" id="qaLiveImgUrl" value="{% url 'dashboard:live_stream' 'cam1' %}">
+
+<div class="rounded-2xl bg-white border border-[#eadfd3] p-5">
+  <p class="text-sm font-semibold text-[#2b1d16]">Evaluación en vivo (cámara)</p>
+  <p class="text-xs text-gray-500 mt-1">
+    Detección en vivo con cajas y conteo por tracking.
+  </p>
+
+  <div class="mt-4 flex flex-wrap gap-3 items-center">
+    <button type="button" id="qaLiveStart"
+            class="px-4 py-2 rounded-lg bg-[#6b4b2a] text-white text-sm font-semibold hover:bg-[#5a3f23]">
+      Iniciar (30s)
+    </button>
+
+    <button type="button" id="qaLiveStop"
+            class="px-4 py-2 rounded-lg border border-[#eadfd3] text-sm font-semibold text-[#2b1d16]"
+            disabled>
+      Detener
+    </button>
+
+    <button type="button" id="qaLiveSave"
+            class="hidden px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">
+      Guardar evaluación
+    </button>
+
+    <span id="qaLiveBadge"
+          class="ml-auto text-xs px-3 py-1 rounded-full bg-gray-50 text-gray-700 border border-gray-200">
+      LIVE
+    </span>
+  </div>
+
+  <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Stream -->
+    <div class="rounded-2xl overflow-hidden border border-[#eadfd3] bg-black">
+      <div class="w-full h-[320px] lg:h-[360px] flex items-center justify-center">
+        <img id="qaLiveImg" src="" class="max-w-full max-h-full object-contain" alt="Live detection">
+      </div>
+      <div class="px-4 py-3 bg-[#fbf7f2] border-t border-[#eadfd3] flex items-center justify-between">
+        <span class="text-xs text-gray-600">Cam: <b>cam1</b></span>
+        <span class="text-xs text-gray-500">Restante: <b><span id="qaLiveRemaining">—</span>s</b></span>
+      </div>
+    </div>
+
+    <!-- Resultados (scroll) -->
+    <div class="rounded-2xl border border-gray-200 bg-[#fbf7f2] p-4">
+      <div class="grid grid-cols-3 gap-3">
+        <div class="bg-white rounded-xl border border-gray-200 p-3">
+          <p class="text-xs text-gray-500">Primarios</p>
+          <p id="qaLivePrimary" class="text-xl font-bold text-[#2b1d16]">—</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-3">
+          <p class="text-xs text-gray-500">Secundarios</p>
+          <p id="qaLiveSecondary" class="text-xl font-bold text-[#2b1d16]">—</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-3">
+          <p class="text-xs text-gray-500">Grade</p>
+          <p id="qaLiveGrade" class="text-xl font-bold text-[#2b1d16]">—</p>
+        </div>
+      </div>
+
+      <div class="mt-4 h-[240px] lg:h-[280px] overflow-y-auto pr-2">
+        <p class="text-sm font-semibold text-[#2b1d16]">Defectos confirmados</p>
+        <div id="qaLiveDefects" class="mt-2 space-y-2">
+          <p class="text-sm text-gray-500">Inicia una evaluación para ver resultados.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

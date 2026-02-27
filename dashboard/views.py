@@ -9,9 +9,16 @@ import tempfile
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
-
 from .models import Batch, Provider, Evaluation
 from .forms import ProviderForm, BatchCreateForm
+
+from django.http import StreamingHttpResponse
+import cv2
+import time
+from django.http import StreamingHttpResponse
+from django.core.cache import cache
+import time
+from inference.live_session import LiveEvalSession
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -22,7 +29,7 @@ TEMPLATE = "dashboard/index.html"
 @login_required(login_url="login")
 def dashboard_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "Estadísticas",
+        "page_title": "Dashboard",
         "active": "dashboard",
     })
 
@@ -321,5 +328,240 @@ def quality_batch_detail(request, batch_id: int):
         "evaluation": evaluation,
     })
 
-
 # ========= Fin: Quality =============
+
+
+# ===== Inicio: Camera streaming (MJPEG) =====
+
+CAMERA_RTSP = {
+    "cam1": "rtsp://192.168.100.10:8554/live/gopro",  # GoPro actual la ip cambia cada vez
+    "cam2": None,  # futura cámara
+}
+
+def _mjpeg_generator(rtsp_url: str):
+    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+
+    # reintenta si no abre
+    while not cap.isOpened():
+        time.sleep(1)
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            time.sleep(0.05)
+            continue
+
+        ok, jpg = cv2.imencode(".jpg", frame)
+        if not ok:
+            continue
+
+        yield (b"--frame\r\n"
+               b"Content-Type: image/jpeg\r\n\r\n" + jpg.tobytes() + b"\r\n")
+
+
+@login_required(login_url="login")
+def camera_stream(request, cam_id: str):
+    rtsp_url = CAMERA_RTSP.get(cam_id)
+
+    if not rtsp_url:
+        return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=404)
+
+    return StreamingHttpResponse(
+        _mjpeg_generator(rtsp_url),
+        content_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+# ===== Fin: Camera streaming (MJPEG) =====
+
+# ===== Inicio: Quality/Live sessions Camera =====
+
+LIVE_SESSIONS = {}
+
+# reutiliza mapeo RTSP
+CAMERA_RTSP = {
+    "cam1": "rtsp://192.168.100.10:8554/live/gopro", # cambia la ip cada vez que se pruebe
+    "cam2": None,
+}
+
+@login_required(login_url="login")
+def live_annotated_stream(request, cam_id: str):
+    """
+    Stream MJPEG del frame anotado por la sesión (cajas+labels+ID).
+    Si no hay sesión corriendo, devuelve 404 para que UI muestre placeholder.
+    """
+    sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
+    if not sess or sess.status()["state"] not in ("running", "finished"):
+        return JsonResponse({"ok": False, "error": "No hay sesión activa."}, status=404)
+
+    def gen():
+        while True:
+            st = sess.status()["state"]
+            jpg = sess.get_latest_jpeg()
+            if jpg:
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+            else:
+                time.sleep(0.05)
+
+            # si terminó, seguimos emitiendo el último frame unos segundos o hasta que el navegador cierre
+            if st in ("finished", "error"):
+                time.sleep(0.05)
+
+    return StreamingHttpResponse(gen(), content_type="multipart/x-mixed-replace; boundary=frame")
+
+@login_required(login_url="login")
+@require_POST
+@csrf_protect
+def live_start(request):
+    cam_id = request.POST.get("cam_id", "cam1")
+    batch_id = request.POST.get("batch_id")
+
+    if not batch_id:
+        return JsonResponse({"ok": False, "error": "Falta batch_id."}, status=400)
+
+    batch = get_object_or_404(Batch, pk=batch_id)
+
+    # No duplicar evaluación guardada
+    if hasattr(batch, "evaluation"):
+        ev = batch.evaluation
+        return JsonResponse({
+            "ok": True,
+            "already_evaluated": True,
+            "grade": ev.grade,
+            "score": float(ev.score) if ev.score is not None else None,
+            "primary_total": ev.primary_total,
+            "secondary_total": ev.secondary_total,
+            "defects_total": ev.defects_total,
+            "counts": ev.counts,
+        })
+
+    rtsp = CAMERA_RTSP.get(cam_id)
+    if not rtsp:
+        return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=400)
+
+    # crea / reinicia sesión
+    old = LIVE_SESSIONS.get(cam_id)
+    if old:
+        try:
+            old.stop()
+        except:
+            pass
+
+    sess = LiveEvalSession(
+        rtsp_url=rtsp,
+        duration_s=30,
+        conf_display=0.35,
+        conf_count=0.50,
+        min_frames_confirm=5,
+        tracker_cfg="bytetrack.yaml",
+    )
+    sess.batch_id = int(batch.id)  # amarra la sesión al lote
+
+    LIVE_SESSIONS[cam_id] = sess
+
+    sess.start()
+
+    return JsonResponse({"ok": True, "state": "running", "cam_id": cam_id, "duration_s": 30})
+
+
+@login_required(login_url="login")
+@require_POST
+@csrf_protect
+def live_stop(request):
+    cam_id = request.POST.get("cam_id", "cam1")
+    sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
+    if not sess:
+        return JsonResponse({"ok": False, "error": "No hay sesión."}, status=404)
+
+    sess.stop()
+    return JsonResponse({"ok": True})
+
+
+@login_required(login_url="login")
+def live_status(request):
+    cam_id = request.GET.get("cam_id", "cam1")
+    batch_id = request.GET.get("batch_id")
+
+    sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
+    if not sess:
+        return JsonResponse({"ok": True, "state": "idle"})
+
+    try:
+        req_batch = int(batch_id) if batch_id else None
+    except:
+        req_batch = None
+
+    if req_batch is not None and getattr(sess, "batch_id", None) != req_batch:
+        return JsonResponse({"ok": True, "state": "idle"})
+
+    return JsonResponse({"ok": True, **sess.status()})
+
+
+@login_required(login_url="login")
+@require_POST
+@csrf_protect
+def live_save(request):
+    cam_id = request.POST.get("cam_id", "cam1")
+    sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
+    if not sess:
+        return JsonResponse({"ok": False, "error": "No hay sesión."}, status=404)
+
+    st = sess.status()
+    if st["state"] != "finished":
+        return JsonResponse({"ok": False, "error": "La sesión aún no ha terminado."}, status=400)
+
+    payload = st["final"] or {}
+    if not payload:
+        return JsonResponse({"ok": False, "error": "No hay resultados."}, status=400)
+
+    batch_id = getattr(sess, "batch_id", None)
+    if not batch_id:
+        return JsonResponse({"ok": False, "error": "Sesión sin batch ligado."}, status=400)
+
+    batch = get_object_or_404(Batch, pk=batch_id)
+    if hasattr(batch, "evaluation"):
+        return JsonResponse({"ok": True, "already_evaluated": True})
+
+    counts_raw = payload.get("counts") or {}
+    # Normaliza a tu formato primary/secondary (reusa tu helper actual)
+    counts = normalize_counts_from_model({"counts": counts_raw})
+
+    primary_total = int(payload.get("primary_total") or 0)
+    secondary_total = int(payload.get("secondary_total") or 0)
+    defects_total = primary_total + secondary_total
+    grade = payload.get("grade")
+    score = payload.get("score")
+
+    with transaction.atomic():
+        ev = Evaluation.objects.create(
+            batch=batch,
+            method=Evaluation.METHOD_CAMERA,
+            grade=grade,
+            score=score,
+            counts=counts,
+            primary_total=primary_total,
+            secondary_total=secondary_total,
+            defects_total=defects_total,
+        )
+
+    # detener y limpiar sesión para que no se "pegue" a otros lotes
+    try:
+        sess.stop()
+    except Exception:
+        pass
+
+    LIVE_SESSIONS.pop(cam_id, None)
+    cache.delete(f"live_batch:{cam_id}")
+
+    return JsonResponse({
+        "ok": True,
+        "grade": ev.grade,
+        "score": float(ev.score) if ev.score is not None else None,
+        "primary_total": ev.primary_total,
+        "secondary_total": ev.secondary_total,
+        "defects_total": ev.defects_total,
+        "counts": ev.counts,
+    })
+
+# ===== Fin: Quality/Live sessions Camera =====

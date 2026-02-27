@@ -182,6 +182,9 @@
           {% include "dashboard/quality/home.html" %}
         {% endif %}
 
+      {% elif active == "camera" %}
+        {% include "dashboard/camera/home.html" %}
+
       {% elif active == "settings" %}
         {% if settings_section == "providers" %}
           {% include "dashboard/settings/providers.html" %}
