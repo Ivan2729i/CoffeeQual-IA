@@ -104,8 +104,8 @@ class BatchCreateForm(forms.ModelForm):
         widgets = {
             "weight_kg": forms.NumberInput(attrs={
                 "class": TW_INPUT,
-                "placeholder": "Peso en kg (ej: 35.50)",
-                "step": "0.01",
+                "placeholder": "Peso en kg (ej: 5.500)",
+                "step": "0.001",
                 "min": "0"
             }),
         }

@@ -1,0 +1,44 @@
+<div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <!-- Cam 1 -->
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+    <div class="flex items-center justify-between">
+      <div>
+        <h3 class="text-lg font-semibold text-[#2b1d16]">Cámara 1 (GoPro)</h3>
+        <p class="text-xs text-gray-500">Monitoreo en Vivo</p>
+      </div>
+
+      <span class="text-xs px-3 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
+        LIVE
+      </span>
+    </div>
+
+    <div class="mt-4 rounded-2xl overflow-hidden border border-[#eadfd3] bg-black">
+      <div class="w-full h-[320px] lg:h-[360px] flex items-center justify-center">
+        <img
+          src="{% url 'dashboard:camera_stream' 'cam1' %}"
+          class="max-w-full max-h-full object-contain"
+          alt="Cam 1 stream"/>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cam 2 -->
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+    <div class="flex items-center justify-between">
+      <div>
+        <h3 class="text-lg font-semibold text-[#2b1d16]">Cámara 2 (GoPro)</h3>
+        <p class="text-xs text-gray-500">Reservada para segunda cámara</p>
+      </div>
+
+      <span class="text-xs px-3 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-200">
+        OFFLINE
+      </span>
+    </div>
+
+    <div class="mt-4 rounded-2xl overflow-hidden border border-[#eadfd3] bg-[#fbf7f2]">
+      <div class="w-full h-[320px] lg:h-[360px] flex items-center justify-center">
+        <p class="text-sm text-gray-500">Conecta una segunda cámara para mostrarla aquí.</p>
+      </div>
+    </div>
+  </div>
+</div>

@@ -9,9 +9,22 @@ import tempfile
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
-
 from .models import Batch, Provider, Evaluation
 from .forms import ProviderForm, BatchCreateForm
+from django.http import StreamingHttpResponse
+import cv2
+import time
+from django.http import StreamingHttpResponse
+from django.core.cache import cache
+import time
+from inference.live_session import LiveEvalSession
+
+from dataclasses import dataclass
+from datetime import date
+from typing import Dict, List
+from django.db.models import Count, Sum, IntegerField, Case, When
+from django.db.models.functions import TruncMonth
+from django.utils import timezone
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -22,7 +35,7 @@ TEMPLATE = "dashboard/index.html"
 @login_required(login_url="login")
 def dashboard_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "Estadísticas",
+        "page_title": "Dashboard",
         "active": "dashboard",
     })
 
@@ -321,5 +334,377 @@ def quality_batch_detail(request, batch_id: int):
         "evaluation": evaluation,
     })
 
-
 # ========= Fin: Quality =============
+
+
+# ===== Inicio: Camera streaming (MJPEG) =====
+
+CAMERA_RTSP = {
+    "cam1": "rtsp://192.168.100.10:8554/live/gopro",  # GoPro actual la ip cambia cada vez
+    "cam2": None,  # futura cámara
+}
+
+def _mjpeg_generator(rtsp_url: str):
+    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+
+    # reintenta si no abre
+    while not cap.isOpened():
+        time.sleep(1)
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            time.sleep(0.05)
+            continue
+
+        ok, jpg = cv2.imencode(".jpg", frame)
+        if not ok:
+            continue
+
+        yield (b"--frame\r\n"
+               b"Content-Type: image/jpeg\r\n\r\n" + jpg.tobytes() + b"\r\n")
+
+
+@login_required(login_url="login")
+def camera_stream(request, cam_id: str):
+    rtsp_url = CAMERA_RTSP.get(cam_id)
+
+    if not rtsp_url:
+        return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=404)
+
+    return StreamingHttpResponse(
+        _mjpeg_generator(rtsp_url),
+        content_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+# ===== Fin: Camera streaming (MJPEG) =====
+
+# ===== Inicio: Quality/Live sessions Camera =====
+
+LIVE_SESSIONS = {}
+
+# reutiliza mapeo RTSP
+CAMERA_RTSP = {
+    "cam1": "rtsp://192.168.100.10:8554/live/gopro", # cambia la ip cada vez que se pruebe
+    "cam2": None,
+}
+
+@login_required(login_url="login")
+def live_annotated_stream(request, cam_id: str):
+    """
+    Stream MJPEG del frame anotado por la sesión (cajas+labels+ID).
+    Si no hay sesión corriendo, devuelve 404 para que UI muestre placeholder.
+    """
+    sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
+    if not sess or sess.status()["state"] not in ("running", "finished"):
+        return JsonResponse({"ok": False, "error": "No hay sesión activa."}, status=404)
+
+    def gen():
+        while True:
+            st = sess.status()["state"]
+            jpg = sess.get_latest_jpeg()
+            if jpg:
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+            else:
+                time.sleep(0.05)
+
+            # si terminó, seguimos emitiendo el último frame unos segundos o hasta que el navegador cierre
+            if st in ("finished", "error"):
+                time.sleep(0.05)
+
+    return StreamingHttpResponse(gen(), content_type="multipart/x-mixed-replace; boundary=frame")
+
+@login_required(login_url="login")
+@require_POST
+@csrf_protect
+def live_start(request):
+    cam_id = request.POST.get("cam_id", "cam1")
+    batch_id = request.POST.get("batch_id")
+
+    if not batch_id:
+        return JsonResponse({"ok": False, "error": "Falta batch_id."}, status=400)
+
+    batch = get_object_or_404(Batch, pk=batch_id)
+
+    # No duplicar evaluación guardada
+    if hasattr(batch, "evaluation"):
+        ev = batch.evaluation
+        return JsonResponse({
+            "ok": True,
+            "already_evaluated": True,
+            "grade": ev.grade,
+            "score": float(ev.score) if ev.score is not None else None,
+            "primary_total": ev.primary_total,
+            "secondary_total": ev.secondary_total,
+            "defects_total": ev.defects_total,
+            "counts": ev.counts,
+        })
+
+    rtsp = CAMERA_RTSP.get(cam_id)
+    if not rtsp:
+        return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=400)
+
+    # crea / reinicia sesión
+    old = LIVE_SESSIONS.get(cam_id)
+    if old:
+        try:
+            old.stop()
+        except:
+            pass
+
+    sess = LiveEvalSession(
+        rtsp_url=rtsp,
+        duration_s=30,
+        conf_display=0.35,
+        conf_count=0.50,
+        min_frames_confirm=5,
+        tracker_cfg="bytetrack.yaml",
+    )
+    sess.batch_id = int(batch.id)  # amarra la sesión al lote
+
+    LIVE_SESSIONS[cam_id] = sess
+
+    sess.start()
+
+    return JsonResponse({"ok": True, "state": "running", "cam_id": cam_id, "duration_s": 30})
+
+
+@login_required(login_url="login")
+@require_POST
+@csrf_protect
+def live_stop(request):
+    cam_id = request.POST.get("cam_id", "cam1")
+    sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
+    if not sess:
+        return JsonResponse({"ok": False, "error": "No hay sesión."}, status=404)
+
+    sess.stop()
+    return JsonResponse({"ok": True})
+
+
+@login_required(login_url="login")
+def live_status(request):
+    cam_id = request.GET.get("cam_id", "cam1")
+    batch_id = request.GET.get("batch_id")
+
+    sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
+    if not sess:
+        return JsonResponse({"ok": True, "state": "idle"})
+
+    try:
+        req_batch = int(batch_id) if batch_id else None
+    except:
+        req_batch = None
+
+    if req_batch is not None and getattr(sess, "batch_id", None) != req_batch:
+        return JsonResponse({"ok": True, "state": "idle"})
+
+    return JsonResponse({"ok": True, **sess.status()})
+
+
+@login_required(login_url="login")
+@require_POST
+@csrf_protect
+def live_save(request):
+    cam_id = request.POST.get("cam_id", "cam1")
+    sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
+    if not sess:
+        return JsonResponse({"ok": False, "error": "No hay sesión."}, status=404)
+
+    st = sess.status()
+    if st["state"] != "finished":
+        return JsonResponse({"ok": False, "error": "La sesión aún no ha terminado."}, status=400)
+
+    payload = st["final"] or {}
+    if not payload:
+        return JsonResponse({"ok": False, "error": "No hay resultados."}, status=400)
+
+    batch_id = getattr(sess, "batch_id", None)
+    if not batch_id:
+        return JsonResponse({"ok": False, "error": "Sesión sin batch ligado."}, status=400)
+
+    batch = get_object_or_404(Batch, pk=batch_id)
+    if hasattr(batch, "evaluation"):
+        return JsonResponse({"ok": True, "already_evaluated": True})
+
+    counts_raw = payload.get("counts") or {}
+    # Normaliza a tu formato primary/secondary (reusa tu helper actual)
+    counts = normalize_counts_from_model({"counts": counts_raw})
+
+    primary_total = int(payload.get("primary_total") or 0)
+    secondary_total = int(payload.get("secondary_total") or 0)
+    defects_total = primary_total + secondary_total
+    grade = payload.get("grade")
+    score = payload.get("score")
+
+    with transaction.atomic():
+        ev = Evaluation.objects.create(
+            batch=batch,
+            method=Evaluation.METHOD_CAMERA,
+            grade=grade,
+            score=score,
+            counts=counts,
+            primary_total=primary_total,
+            secondary_total=secondary_total,
+            defects_total=defects_total,
+        )
+
+    # detener y limpiar sesión para que no se "pegue" a otros lotes
+    try:
+        sess.stop()
+    except Exception:
+        pass
+
+    LIVE_SESSIONS.pop(cam_id, None)
+    cache.delete(f"live_batch:{cam_id}")
+
+    return JsonResponse({
+        "ok": True,
+        "grade": ev.grade,
+        "score": float(ev.score) if ev.score is not None else None,
+        "primary_total": ev.primary_total,
+        "secondary_total": ev.secondary_total,
+        "defects_total": ev.defects_total,
+        "counts": ev.counts,
+    })
+
+# ===== Fin: Quality/Live sessions Camera =====
+
+# ===== Inicio: Graficas Dashboard =====
+
+MONTH_NAMES_ES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+
+
+def _safe_pct(num: float, den: float) -> float:
+    if den <= 0:
+        return 0.0
+    return round((num / den) * 100.0, 2)
+
+
+def _year_month_bounds(year: int, month: int) -> tuple[date, date]:
+    # inicio mes, inicio mes siguiente
+    start = date(year, month, 1)
+    if month == 12:
+        end = date(year + 1, 1, 1)
+    else:
+        end = date(year, month + 1, 1)
+    return start, end
+
+
+def dashboard_summary_api(request):
+    now = timezone.localtime(timezone.now())
+    year = now.year
+    current_month = now.month
+    prev_month = current_month - 1 if current_month > 1 else 12
+    prev_year = year if current_month > 1 else year - 1
+
+    # ========= 1) Series por mes =========
+    monthly_qs = (
+        Evaluation.objects
+        .filter(created_at__year=year)
+        .annotate(month=TruncMonth("created_at"))
+        .values("month")
+        .annotate(
+            lots=Count("id"),
+            kg=Sum("batch__weight_kg"),
+            accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+            total=Count("id"),
+        )
+        .order_by("month")
+    )
+
+    # Rellenar meses faltantes (1..12) con 0
+    lots_by_month = {m: 0 for m in range(1, 13)}
+    kg_by_month = {m: 0.0 for m in range(1, 13)}
+    acc_by_month = {m: 0 for m in range(1, 13)}
+    total_by_month = {m: 0 for m in range(1, 13)}
+
+    for row in monthly_qs:
+        month_num = row["month"].month
+        lots_by_month[month_num] = int(row["lots"] or 0)
+        kg_by_month[month_num] = float(row["kg"] or 0.0)
+        acc_by_month[month_num] = int(row["accepted"] or 0)
+        total_by_month[month_num] = int(row["total"] or 0)
+
+    labels = MONTH_NAMES_ES
+    lots_series = [lots_by_month[m] for m in range(1, 13)]
+    kg_series = [round(kg_by_month[m], 2) for m in range(1, 13)]
+
+    # ========= 2) KPIs globales =========
+    global_qs = Evaluation.objects.all().aggregate(
+        total_lots=Count("id"),
+        total_kg=Sum("batch__weight_kg"),
+        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+        rejected=Count(Case(When(grade=4, then=1), output_field=IntegerField())),
+    )
+
+    total_lots = int(global_qs["total_lots"] or 0)
+    total_kg = float(global_qs["total_kg"] or 0.0)
+    accepted = int(global_qs["accepted"] or 0)
+    rejected = int(global_qs["rejected"] or 0)
+
+    quality_pct = _safe_pct(accepted, total_lots)
+    reject_pct = _safe_pct(rejected, total_lots)
+
+    # ========= 3) Comparativa mes actual vs anterior =========
+    cur_start, cur_end = _year_month_bounds(year, current_month)
+    prev_start, prev_end = _year_month_bounds(prev_year, prev_month)
+
+    cur = Evaluation.objects.filter(created_at__date__gte=cur_start, created_at__date__lt=cur_end).aggregate(
+        lots=Count("id"),
+        kg=Sum("batch__weight_kg"),
+        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+    )
+    prev = Evaluation.objects.filter(created_at__date__gte=prev_start, created_at__date__lt=prev_end).aggregate(
+        lots=Count("id"),
+        kg=Sum("batch__weight_kg"),
+        accepted=Count(Case(When(grade__in=[1, 2], then=1), output_field=IntegerField())),
+    )
+
+    cur_lots = int(cur["lots"] or 0)
+    prev_lots = int(prev["lots"] or 0)
+
+    cur_kg = float(cur["kg"] or 0.0)
+    prev_kg = float(prev["kg"] or 0.0)
+
+    cur_quality = _safe_pct(int(cur["accepted"] or 0), cur_lots)
+    prev_quality = _safe_pct(int(prev["accepted"] or 0), prev_lots)
+
+    def delta_pct(cur_val: float, prev_val: float) -> float:
+        if prev_val == 0:
+            return 0.0 if cur_val == 0 else 100.0
+        return round(((cur_val - prev_val) / prev_val) * 100.0, 2)
+
+    comparison = {
+        "current": {"year": year, "month": current_month},
+        "previous": {"year": prev_year, "month": prev_month},
+        "lots": {"current": cur_lots, "previous": prev_lots, "delta_pct": delta_pct(cur_lots, prev_lots)},
+        "kg": {"current": round(cur_kg, 2), "previous": round(prev_kg, 2), "delta_pct": delta_pct(cur_kg, prev_kg)},
+        "quality": {
+            "current": cur_quality,
+            "previous": prev_quality,
+            "delta_points": round(cur_quality - prev_quality, 2),
+        },
+    }
+
+    payload = {
+        "year": year,
+        "has_data": total_lots > 0,
+        "kpis": {
+            "total_lots": total_lots,
+            "total_kg": round(total_kg, 2),
+            "quality_pct": quality_pct,
+            "reject_pct": reject_pct,
+        },
+        "charts": {
+            "labels": labels,
+            "lots_by_month": lots_series,
+            "kg_by_month": kg_series,
+        },
+        "comparison": comparison,
+    }
+    return JsonResponse(payload)
+
+# ===== Fin: Graficas Dashboard =====

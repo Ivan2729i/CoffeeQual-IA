@@ -1,6 +1,6 @@
 {% load static %}
 
-<div class="mt-6 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 max-w-5xl">
+<div class="mt-6 bg-white rounded-2xl shadow-sm border border-gray-200 p-6 max-w-5xl max-h-[88vh] overflow-y-auto">
 
   <div class="flex items-start justify-between gap-4">
     <div>
@@ -127,30 +127,7 @@
       </div>
       <!-- Panel En vivo -->
       <div id="qaPanelLive" class="mt-4 hidden">
-        <div class="rounded-2xl bg-white border border-[#eadfd3] p-5">
-          <p class="text-sm font-semibold text-[#2b1d16]">Evaluación en vivo (cámara)</p>
-          <p class="text-xs text-gray-500 mt-1">
-            Preview de cámara + conteo en tiempo real.
-          </p>
-
-          <div class="mt-4 flex gap-3">
-            <button type="button" id="qaLiveStart"
-                    class="px-4 py-2 rounded-lg bg-[#6b4b2a] text-white text-sm font-semibold hover:bg-[#5a3f23] opacity-60 cursor-not-allowed"
-                    disabled>
-              Iniciar en vivo
-            </button>
-
-            <button type="button" id="qaLiveStop"
-                    class="px-4 py-2 rounded-lg border border-[#eadfd3] text-sm font-semibold text-[#2b1d16] opacity-60 cursor-not-allowed"
-                    disabled>
-              Detener
-            </button>
-          </div>
-
-          <div class="mt-4 rounded-xl bg-[#fbf7f2] border border-[#eadfd3] p-4 text-xs text-gray-600">
-            Streaming + detección en vivo (cámaras físicas).
-          </div>
-        </div>
+        {% include "dashboard/quality/live_panel.html" %}
       </div>
 
     </div>
