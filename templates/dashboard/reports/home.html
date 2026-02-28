@@ -1,10 +1,157 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+{% load static %}
 
-</body>
-</html>
+<div class="p-6">
+  <div class="rounded-3xl border border-zinc-200 bg-white/55 backdrop-blur shadow-sm">
+    <div class="p-6 space-y-5" id="reportsRoot"
+         data-api-lote="{% url 'dashboard:reports_lote_api' 0 %}"
+         data-api-provider="{% url 'dashboard:reports_provider_api' 0 %}"
+         data-api-month="{% url 'dashboard:reports_month_api' %}"
+         data-api-global="{% url 'dashboard:reports_global_api' %}"
+         data-pdf-month="{% url 'dashboard:reports_month_pdf' %}"
+         data-csv-month="{% url 'dashboard:reports_month_csv' %}"
+         data-pdf-global="{% url 'dashboard:reports_global_pdf' %}"
+         data-csv-global="{% url 'dashboard:reports_global_csv' %}"
+         data-pdf-lote-base="{% url 'dashboard:reports_lote_pdf' 999999 %}"
+         data-csv-lote-base="{% url 'dashboard:reports_lote_csv' 999999 %}"
+         data-pdf-provider-base="{% url 'dashboard:reports_provider_pdf' 999999 %}"
+         data-csv-provider-base="{% url 'dashboard:reports_provider_csv' 999999 %}">
+
+      <div>
+        <h2 class="text-2xl font-semibold text-zinc-900">Gestión de Reportes</h2>
+        <p class="mt-1 text-sm text-zinc-500">
+          Genera reportes por lote, mes (histórico), proveedor o global.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- CONTROLES -->
+        <div class="lg:col-span-1 rounded-2xl border border-zinc-200 bg-white/70 p-4 space-y-4">
+
+          <!-- Tipo -->
+          <div>
+            <div class="text-xs uppercase tracking-wide text-zinc-500">Tipo de reporte</div>
+            <select id="reportType"
+                    class="mt-2 w-full rounded-xl border border-zinc-200 bg-white text-zinc-900 px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-zinc-300">
+              <option class="text-zinc-900" value="lote">Por lote</option>
+              <option class="text-zinc-900" value="month">Por mes (histórico)</option>
+              <option class="text-zinc-900" value="provider">Por proveedor</option>
+              <option class="text-zinc-900" value="global">Global</option>
+            </select>
+          </div>
+
+          <!-- BLOQUE: LOTE -->
+          <div id="blockLote">
+            <div class="text-xs uppercase tracking-wide text-zinc-500">Lote evaluado</div>
+
+            <select id="batchSelect"
+                    class="mt-2 w-full h-56 rounded-xl border border-zinc-200 bg-white text-zinc-900 px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-zinc-300 scrollbar-soft overflow-y-auto"
+                    size="10">
+              {% for b in evaluated_batches %}
+                <option class="text-zinc-900" value="{{ b.id }}">
+                  {{ b.code }} — {{ b.provider.first_name }} {{ b.provider.last_name }}
+                </option>
+              {% empty %}
+                <option class="text-zinc-900" value="" disabled>No hay lotes evaluados</option>
+              {% endfor %}
+            </select>
+
+            <p class="mt-2 text-xs text-zinc-500">Listado de todos los lotes evaluados.</p>
+          </div>
+
+          <!-- BLOQUE: MES -->
+          <div id="blockMonth" class="hidden">
+            <div class="text-xs uppercase tracking-wide text-zinc-500">Periodo (histórico)</div>
+
+            <div class="mt-2 grid grid-cols-2 gap-2">
+              <div>
+                <div class="text-[11px] text-zinc-500">Año</div>
+                <select id="yearSelect"
+                        class="mt-1 w-full h-40 rounded-xl border border-zinc-200 bg-white text-zinc-900 px-3 py-2 text-sm
+                               focus:outline-none focus:ring-2 focus:ring-zinc-300 scrollbar-soft overflow-y-auto"
+                        size="6">
+                  {% for y in years %}
+                    <option class="text-zinc-900" value="{{ y }}" {% if y == current_year %}selected{% endif %}>
+                      {{ y }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div>
+                <div class="text-[11px] text-zinc-500">Mes</div>
+                <select id="monthSelect"
+                        class="mt-1 w-full rounded-xl border border-zinc-200 bg-white text-zinc-900 px-3 py-2 text-sm
+                               focus:outline-none focus:ring-2 focus:ring-zinc-300">
+                  <option class="text-zinc-900" value="1"  {% if current_month == 1 %}selected{% endif %}>Ene</option>
+                  <option class="text-zinc-900" value="2"  {% if current_month == 2 %}selected{% endif %}>Feb</option>
+                  <option class="text-zinc-900" value="3"  {% if current_month == 3 %}selected{% endif %}>Mar</option>
+                  <option class="text-zinc-900" value="4"  {% if current_month == 4 %}selected{% endif %}>Abr</option>
+                  <option class="text-zinc-900" value="5"  {% if current_month == 5 %}selected{% endif %}>May</option>
+                  <option class="text-zinc-900" value="6"  {% if current_month == 6 %}selected{% endif %}>Jun</option>
+                  <option class="text-zinc-900" value="7"  {% if current_month == 7 %}selected{% endif %}>Jul</option>
+                  <option class="text-zinc-900" value="8"  {% if current_month == 8 %}selected{% endif %}>Ago</option>
+                  <option class="text-zinc-900" value="9"  {% if current_month == 9 %}selected{% endif %}>Sep</option>
+                  <option class="text-zinc-900" value="10" {% if current_month == 10 %}selected{% endif %}>Oct</option>
+                  <option class="text-zinc-900" value="11" {% if current_month == 11 %}selected{% endif %}>Nov</option>
+                  <option class="text-zinc-900" value="12" {% if current_month == 12 %}selected{% endif %}>Dic</option>
+                </select>
+              </div>
+            </div>
+
+            <p class="mt-2 text-xs text-zinc-500">Año mínimo permitido: <b>2024</b>.</p>
+          </div>
+
+          <!-- BLOQUE: PROVEEDOR -->
+          <div id="blockProvider" class="hidden">
+            <div class="text-xs uppercase tracking-wide text-zinc-500">Proveedor</div>
+
+            <select id="providerSelect"
+                    class="mt-2 w-full h-56 rounded-xl border border-zinc-200 bg-white text-zinc-900 px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-zinc-300 scrollbar-soft overflow-y-auto"
+                    size="10">
+              {% for p in providers %}
+                <option class="text-zinc-900" value="{{ p.id }}">{{ p.last_name }} {{ p.first_name }}</option>
+              {% empty %}
+                <option class="text-zinc-900" value="" disabled>No hay proveedores</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- BOTONES -->
+          <div class="flex gap-2 pt-1">
+            <a id="btnPdf" href="#"
+               class="btn-shine pointer-events-none opacity-50 inline-flex items-center justify-center rounded-xl
+                      bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 transition">
+              PDF
+            </a>
+
+            <a id="btnCsv" href="#"
+               class="btn-shine pointer-events-none opacity-50 inline-flex items-center justify-center rounded-xl
+                      bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition">
+              CSV
+            </a>
+          </div>
+
+          <div class="text-xs text-zinc-500" id="helperText">
+            Selecciona un lote para habilitar descargas.
+          </div>
+        </div>
+
+        <!-- PREVIEW -->
+        <div class="lg:col-span-2 rounded-2xl border border-zinc-200 bg-white/70 p-4">
+          <div class="flex items-center justify-between">
+            <div class="text-xs uppercase tracking-wide text-zinc-500">Vista previa</div>
+            <span id="previewStatus" class="text-xs text-zinc-500">—</span>
+          </div>
+
+          <div id="previewBox" class="mt-3 text-sm text-zinc-600">
+            Configura el tipo de reporte y selecciona un parámetro.
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>

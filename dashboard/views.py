@@ -11,20 +11,25 @@ from django.views.decorators.http import require_http_methods
 from django.db import transaction
 from .models import Batch, Provider, Evaluation
 from .forms import ProviderForm, BatchCreateForm
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, HttpResponse
 import cv2
 import time
 from django.http import StreamingHttpResponse
 from django.core.cache import cache
 import time
 from inference.live_session import LiveEvalSession
-
 from dataclasses import dataclass
 from datetime import date
 from typing import Dict, List
 from django.db.models import Count, Sum, IntegerField, Case, When
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
+import io
+import csv
+from collections import Counter
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import inch
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -82,9 +87,27 @@ def activity_log_view(request):
 
 @login_required(login_url="login")
 def reports_view(request):
+    evaluated_batches = (
+        Batch.objects
+        .select_related("provider")
+        .filter(evaluation__isnull=False)
+        .order_by("-created_at")
+    )
+
+    providers = Provider.objects.order_by("last_name", "first_name")
+
+    now = timezone.localtime(timezone.now())
+    current_year = now.year
+    years = list(range(2024, current_year + 1))
+
     return render(request, TEMPLATE, {
         "page_title": "Report generation",
         "active": "reports",
+        "evaluated_batches": evaluated_batches,
+        "providers": providers,
+        "years": years,
+        "current_year": current_year,
+        "current_month": now.month,
     })
 
 
@@ -572,7 +595,7 @@ def live_save(request):
 
 # ===== Fin: Quality/Live sessions Camera =====
 
-# ===== Inicio: Graficas Dashboard =====
+# ===== Inicio: Dashboard/Graficas Dashboard =====
 
 MONTH_NAMES_ES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
 
@@ -707,4 +730,445 @@ def dashboard_summary_api(request):
     }
     return JsonResponse(payload)
 
-# ===== Fin: Graficas Dashboard =====
+# ===== Fin: Dashboard/Graficas Dashboard =====
+
+
+# ===== Inicio: Reports/Reports helpers =====
+
+MONTH_NAMES_ES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+
+def _safe_pct(num: float, den: float) -> float:
+    if den <= 0:
+        return 0.0
+    return round((num / den) * 100.0, 2)
+
+def _validate_year_month(year: int | None, month: int | None):
+    if year is None or month is None:
+        return False, "Faltan parámetros year y month."
+    if year < 2024:
+        return False, "El año mínimo permitido es 2024."
+    if month < 1 or month > 12:
+        return False, "El mes debe estar entre 1 y 12."
+    return True, ""
+
+def _month_bounds(year: int, month: int):
+    start = timezone.datetime(year, month, 1, tzinfo=timezone.get_current_timezone())
+    if month == 12:
+        end = timezone.datetime(year + 1, 1, 1, tzinfo=timezone.get_current_timezone())
+    else:
+        end = timezone.datetime(year, month + 1, 1, tzinfo=timezone.get_current_timezone())
+    return start, end
+
+def _normalize_counts(counts: dict) -> tuple[dict, dict]:
+    counts = counts or {}
+    primary = counts.get("primary") or {}
+    secondary = counts.get("secondary") or {}
+    return dict(primary), dict(secondary)
+
+def _aggregate_defects(evals):
+    # suma todas las keys del JSON counts en primarios/secundarios
+    prim = Counter()
+    sec = Counter()
+
+    for ev in evals:
+        primary, secondary = _normalize_counts(ev.counts)
+        for k, v in primary.items():
+            try: prim[k] += int(v)
+            except: pass
+        for k, v in secondary.items():
+            try: sec[k] += int(v)
+            except: pass
+
+    # top 10
+    return dict(prim.most_common(10)), dict(sec.most_common(10))
+
+def _summary_from_evals(evals_qs):
+    # evals_qs: QuerySet[Evaluation]
+    total_lots = evals_qs.count()
+    total_kg = float(
+        evals_qs.aggregate(s=Sum("batch__weight_kg"))["s"] or 0.0
+    )
+
+    accepted = evals_qs.filter(grade__in=[1, 2]).count()
+    rejected = evals_qs.filter(grade=4).count()
+
+    quality_pct = _safe_pct(accepted, total_lots)
+    reject_pct = _safe_pct(rejected, total_lots)
+
+    top_primary, top_secondary = _aggregate_defects(evals_qs)
+
+    return {
+        "total_lots": total_lots,
+        "total_kg": round(total_kg, 3),
+        "accepted": accepted,
+        "rejected": rejected,
+        "quality_pct": quality_pct,
+        "reject_pct": reject_pct,
+        "top_defects": {
+            "primary": top_primary,
+            "secondary": top_secondary,
+        }
+    }
+
+def _pdf_response(title: str, filename: str, meta_lines: list[str], summary: dict, extra_sections: list[tuple[str, dict]] = None):
+    extra_sections = extra_sections or []
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(0.8 * inch, height - 0.9 * inch, title)
+
+    c.setFont("Helvetica", 10)
+    y = height - 1.25 * inch
+    for line in meta_lines:
+        c.drawString(0.8 * inch, y, line)
+        y -= 0.2 * inch
+
+    y -= 0.15 * inch
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(0.8 * inch, y, "Resumen")
+    y -= 0.25 * inch
+
+    c.setFont("Helvetica", 10)
+    lines = [
+        f"Lotes evaluados: {summary['total_lots']}",
+        f"KG procesados: {summary['total_kg']:.3f} kg",
+        f"Calidad (% Grado 1-2): {summary['quality_pct']:.2f}%",
+        f"Rechazo (% Grado 4): {summary['reject_pct']:.2f}%",
+    ]
+    for line in lines:
+        c.drawString(0.8 * inch, y, line)
+        y -= 0.2 * inch
+
+    def draw_top(title_s: str, data: dict, y0: float) -> float:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(0.8 * inch, y0, title_s)
+        y = y0 - 0.25 * inch
+
+        c.setFont("Helvetica", 10)
+        if not data:
+            c.drawString(0.9 * inch, y, "Sin datos.")
+            return y - 0.25 * inch
+
+        for k, v in data.items():
+            if y < 1.2 * inch:
+                c.showPage()
+                y = height - 1.0 * inch
+                c.setFont("Helvetica", 10)
+            c.drawString(0.9 * inch, y, str(k))
+            c.drawRightString(5.6 * inch, y, str(v))
+            y -= 0.18 * inch
+        return y - 0.18 * inch
+
+    y -= 0.2 * inch
+    y = draw_top("Defectos Primarios", summary["top_defects"]["primary"], y)
+    y = draw_top("Defectos Secundarios", summary["top_defects"]["secondary"], y)
+
+    for section_title, section_data in extra_sections:
+        y -= 0.15 * inch
+        y = draw_top(section_title, section_data, y)
+
+    c.setFont("Helvetica-Oblique", 9)
+    c.drawString(0.8 * inch, 0.8 * inch, "Generado por CoffeeQual AI.")
+
+    c.showPage()
+    c.save()
+
+    pdf = buf.getvalue()
+    buf.close()
+
+    resp = HttpResponse(pdf, content_type="application/pdf")
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+def _csv_response(filename: str, header: list[str], rows: list[dict]):
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=header)
+    writer.writeheader()
+    for r in rows:
+        writer.writerow(r)
+
+    resp = HttpResponse(output.getvalue(), content_type="text/csv; charset=utf-8")
+    resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+# ===== Fin: Reports/Reports helpers =====
+
+
+# ===== Inicio: Reports/Generar reportes =====
+
+# ===== Inicio: Reports/Generar reportes por Lote =====
+@login_required(login_url="login")
+def reports_lote_api(request, batch_id: int):
+    batch = get_object_or_404(Batch.objects.select_related("provider"), pk=batch_id)
+    if not hasattr(batch, "evaluation"):
+        return JsonResponse({"ok": True, "has_data": False, "error": "Este lote no tiene evaluación."})
+
+    ev = batch.evaluation
+    provider_name = f"{batch.provider.first_name} {batch.provider.last_name}".strip()
+
+    primary, secondary = _normalize_counts(ev.counts)
+
+    return JsonResponse({
+        "ok": True,
+        "mode": "lote",
+        "has_data": True,
+        "batch": {
+            "id": batch.id,
+            "code": batch.code,
+            "weight_kg": float(batch.weight_kg),
+            "status": batch.status,
+            "created_at": batch.created_at.isoformat(),
+            "provider": {"id": batch.provider_id, "name": provider_name, "contact": getattr(batch.provider, "contact", "")}
+        },
+        "evaluation": {
+            "method": ev.method,
+            "grade": ev.grade,
+            "score": float(ev.score) if ev.score is not None else None,
+            "primary_total": ev.primary_total,
+            "secondary_total": ev.secondary_total,
+            "defects_total": ev.defects_total,
+            "created_at": ev.created_at.isoformat(),
+            "counts": {"primary": primary, "secondary": secondary}
+        }
+    })
+
+
+@login_required(login_url="login")
+def reports_lote_pdf(request, batch_id: int):
+    batch = get_object_or_404(Batch.objects.select_related("provider"), pk=batch_id)
+    if not hasattr(batch, "evaluation"):
+        return HttpResponse("Este lote no tiene evaluación.", status=404)
+
+    ev = batch.evaluation
+    provider_name = f"{batch.provider.first_name} {batch.provider.last_name}".strip()
+
+    summary = _summary_from_evals(Evaluation.objects.filter(batch=batch))
+
+    meta = [
+        f"Tipo: Lote",
+        f"Lote: {batch.code} (ID {batch.id})",
+        f"Proveedor: {provider_name}",
+        f"Peso: {float(batch.weight_kg):.3f} kg",
+        f"Fecha evaluación: {ev.created_at.strftime('%Y-%m-%d %H:%M')}",
+        f"Grado: {ev.grade if ev.grade is not None else '—'} | Score: {float(ev.score):.2f}" if ev.score is not None else f"Grado: {ev.grade if ev.grade is not None else '—'} | Score: —",
+        f"Totales: P {ev.primary_total} | S {ev.secondary_total} | Total {ev.defects_total}",
+    ]
+
+    filename = f"reporte_lote_{batch.code}.pdf"
+    return _pdf_response("CoffeeQual AI - Reporte por Lote", filename, meta, summary)
+
+
+@login_required(login_url="login")
+def reports_lote_csv(request, batch_id: int):
+    batch = get_object_or_404(Batch.objects.select_related("provider"), pk=batch_id)
+    if not hasattr(batch, "evaluation"):
+        return HttpResponse("Este lote no tiene evaluación.", status=404)
+
+    ev = batch.evaluation
+    provider_name = f"{batch.provider.first_name} {batch.provider.last_name}".strip()
+
+    primary, secondary = _normalize_counts(ev.counts)
+    row = {
+        "mode": "lote",
+        "batch_id": batch.id,
+        "batch_code": batch.code,
+        "provider": provider_name,
+        "weight_kg": float(batch.weight_kg),
+        "batch_created_at": batch.created_at.isoformat(),
+        "evaluation_created_at": ev.created_at.isoformat(),
+        "method": ev.method,
+        "grade": ev.grade,
+        "score": float(ev.score) if ev.score is not None else "",
+        "primary_total": ev.primary_total,
+        "secondary_total": ev.secondary_total,
+        "defects_total": ev.defects_total,
+    }
+    # agrega counts
+    for k, v in primary.items():
+        row[f"primary_{k}"] = v
+    for k, v in secondary.items():
+        row[f"secondary_{k}"] = v
+
+    header = list(row.keys())
+    return _csv_response(f"reporte_lote_{batch.code}.csv", header, [row])
+# ===== Fin: Reports/Generar reportes por Lote =====
+
+# ===== Inicio: Reports/Generar reportes por mes =====
+@login_required(login_url="login")
+def reports_month_api(request):
+    try:
+        year = int(request.GET.get("year"))
+        month = int(request.GET.get("month"))
+    except:
+        return JsonResponse({"ok": False, "error": "year y month deben ser enteros."}, status=400)
+
+    ok, msg = _validate_year_month(year, month)
+    if not ok:
+        return JsonResponse({"ok": False, "error": msg}, status=400)
+
+    start, end = _month_bounds(year, month)
+    qs = Evaluation.objects.filter(created_at__gte=start, created_at__lt=end)
+
+    summary = _summary_from_evals(qs)
+    return JsonResponse({
+        "ok": True,
+        "mode": "month",
+        "has_data": summary["total_lots"] > 0,
+        "period": {"year": year, "month": month, "label": f"{MONTH_NAMES_ES[month-1]} {year}"},
+        "summary": summary,
+    })
+
+
+@login_required(login_url="login")
+def reports_month_pdf(request):
+    try:
+        year = int(request.GET.get("year"))
+        month = int(request.GET.get("month"))
+    except:
+        return HttpResponse("year y month deben ser enteros.", status=400)
+
+    ok, msg = _validate_year_month(year, month)
+    if not ok:
+        return HttpResponse(msg, status=400)
+
+    start, end = _month_bounds(year, month)
+    qs = Evaluation.objects.filter(created_at__gte=start, created_at__lt=end)
+    summary = _summary_from_evals(qs)
+
+    if summary["total_lots"] <= 0:
+        return HttpResponse("Sin datos para ese periodo.", status=404)
+
+    meta = [f"Tipo: Mes", f"Periodo: {MONTH_NAMES_ES[month-1]} {year}"]
+    filename = f"reporte_mes_{year}_{month:02d}.pdf"
+    return _pdf_response("CoffeeQual AI - Reporte Mensual", filename, meta, summary)
+
+
+@login_required(login_url="login")
+def reports_month_csv(request):
+    try:
+        year = int(request.GET.get("year"))
+        month = int(request.GET.get("month"))
+    except:
+        return HttpResponse("year y month deben ser enteros.", status=400)
+
+    ok, msg = _validate_year_month(year, month)
+    if not ok:
+        return HttpResponse(msg, status=400)
+
+    start, end = _month_bounds(year, month)
+    qs = Evaluation.objects.filter(created_at__gte=start, created_at__lt=end)
+    summary = _summary_from_evals(qs)
+    if summary["total_lots"] <= 0:
+        return HttpResponse("Sin datos para ese periodo.", status=404)
+
+    # 1 fila resumen + filas por lote
+    rows = [{
+        "mode": "month",
+        "year": year,
+        "month": month,
+        "total_lots": summary["total_lots"],
+        "total_kg": summary["total_kg"],
+        "quality_pct": summary["quality_pct"],
+        "reject_pct": summary["reject_pct"],
+    }]
+
+    header = list(rows[0].keys())
+    return _csv_response(f"reporte_mes_{year}_{month:02d}.csv", header, rows)
+# ===== Fin: Reports/Generar reportes por mes =====
+
+# ===== Inicio: Reports/Generar reportes por Global =====
+
+@login_required(login_url="login")
+def reports_global_api(request):
+    qs = Evaluation.objects.all()
+    summary = _summary_from_evals(qs)
+    return JsonResponse({"ok": True, "mode": "global", "has_data": summary["total_lots"] > 0, "summary": summary})
+
+
+@login_required(login_url="login")
+def reports_global_pdf(request):
+    qs = Evaluation.objects.all()
+    summary = _summary_from_evals(qs)
+    if summary["total_lots"] <= 0:
+        return HttpResponse("Sin datos.", status=404)
+
+    meta = ["Tipo: Global", "Periodo: Todos los lotes evaluados"]
+    return _pdf_response("CoffeeQual AI - Reporte Global", "reporte_global.pdf", meta, summary)
+
+
+@login_required(login_url="login")
+def reports_global_csv(request):
+    qs = Evaluation.objects.all()
+    summary = _summary_from_evals(qs)
+    if summary["total_lots"] <= 0:
+        return HttpResponse("Sin datos.", status=404)
+
+    rows = [{
+        "mode": "global",
+        "total_lots": summary["total_lots"],
+        "total_kg": summary["total_kg"],
+        "quality_pct": summary["quality_pct"],
+        "reject_pct": summary["reject_pct"],
+    }]
+    return _csv_response("reporte_global.csv", list(rows[0].keys()), rows)
+# ===== Fin: Reports/Generar reportes Global =====
+
+# ===== Inicio: Reports/Generar reportes por Proveedor =====
+@login_required(login_url="login")
+def reports_provider_api(request, provider_id: int):
+    provider = get_object_or_404(Provider, pk=provider_id)
+    qs = Evaluation.objects.filter(batch__provider=provider)
+
+    summary = _summary_from_evals(qs)
+    provider_name = f"{provider.first_name} {provider.last_name}".strip()
+
+    return JsonResponse({
+        "ok": True,
+        "mode": "provider",
+        "has_data": summary["total_lots"] > 0,
+        "provider": {"id": provider.id, "name": provider_name, "contact": getattr(provider, "contact", "")},
+        "summary": summary,
+    })
+
+
+@login_required(login_url="login")
+def reports_provider_pdf(request, provider_id: int):
+    provider = get_object_or_404(Provider, pk=provider_id)
+    provider_name = f"{provider.first_name} {provider.last_name}".strip()
+
+    qs = Evaluation.objects.filter(batch__provider=provider)
+    summary = _summary_from_evals(qs)
+    if summary["total_lots"] <= 0:
+        return HttpResponse("Sin datos para este proveedor.", status=404)
+
+    meta = ["Tipo: Proveedor", f"Proveedor: {provider_name}"]
+    filename = f"reporte_proveedor_{provider.id}.pdf"
+    return _pdf_response("CoffeeQual AI - Reporte por Proveedor", filename, meta, summary)
+
+
+@login_required(login_url="login")
+def reports_provider_csv(request, provider_id: int):
+    provider = get_object_or_404(Provider, pk=provider_id)
+    provider_name = f"{provider.first_name} {provider.last_name}".strip()
+
+    qs = Evaluation.objects.filter(batch__provider=provider)
+    summary = _summary_from_evals(qs)
+    if summary["total_lots"] <= 0:
+        return HttpResponse("Sin datos para este proveedor.", status=404)
+
+    rows = [{
+        "mode": "provider",
+        "provider_id": provider.id,
+        "provider": provider_name,
+        "total_lots": summary["total_lots"],
+        "total_kg": summary["total_kg"],
+        "quality_pct": summary["quality_pct"],
+        "reject_pct": summary["reject_pct"],
+    }]
+    return _csv_response(f"reporte_proveedor_{provider.id}.csv", list(rows[0].keys()), rows)
+# ===== Fin: Reports/Generar reportes por Proveedor =====
+
+# ===== Fin: Reports/Generar reportes =====

@@ -195,7 +195,7 @@ html, body{
 .link-underline:hover{ color:#fff; letter-spacing:.3px; }
 .link-underline:hover::after{ width:100%; }
 
-/* Botón secundario con MISMA animación (brillo) pero estilo suave/outline */
+/* Botón secundario con animación (brillo) */
 .btn-fs-soft{
   position: relative;
   display: inline-flex;
@@ -222,7 +222,7 @@ html, body{
 }
 .btn-fs-soft:active{ transform: translateY(1px); }
 
-/* Brillo deslizante igual que btn-fs */
+/* Brillo deslizante */
 .btn-fs-soft::after{
   content:"";
   position:absolute;
@@ -281,7 +281,7 @@ html, body{
 .btn-shine{
   position: relative;
   overflow: hidden;
-  isolation: isolate; /* el brillo no se sale */
+  isolation: isolate;
 }
 
 .btn-shine::after{
