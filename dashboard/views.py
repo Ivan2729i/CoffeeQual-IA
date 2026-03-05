@@ -30,6 +30,8 @@ from collections import Counter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
+from decimal import Decimal
+from django.db.models import Sum, Q
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -48,7 +50,7 @@ def dashboard_view(request):
 @login_required(login_url="login")
 def camera_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "Camera monitoring",
+        "page_title": "Camera Monitoring",
         "active": "camera",
     })
 
@@ -56,7 +58,7 @@ def camera_view(request):
 @login_required(login_url="login")
 def quality_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "Quality assessment",
+        "page_title": "Quality Assessment",
         "active": "quality",
     })
 
@@ -64,7 +66,7 @@ def quality_view(request):
 @login_required(login_url="login")
 def batch_metrics_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "Batch metrics",
+        "page_title": "Batch Metrics",
         "active": "batch",
     })
 
@@ -72,7 +74,7 @@ def batch_metrics_view(request):
 @login_required(login_url="login")
 def packaging_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "Packaging and distribution",
+        "page_title": "Packaging and Distribution",
         "active": "packaging",
     })
 
@@ -101,7 +103,7 @@ def reports_view(request):
     years = list(range(2024, current_year + 1))
 
     return render(request, TEMPLATE, {
-        "page_title": "Report generation",
+        "page_title": "Report Generation",
         "active": "reports",
         "evaluated_batches": evaluated_batches,
         "providers": providers,
@@ -114,7 +116,7 @@ def reports_view(request):
 @login_required(login_url="login")
 def alerts_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "Alerts and notifications",
+        "page_title": "Alerts and Notifications",
         "active": "alerts",
     })
 
@@ -122,7 +124,7 @@ def alerts_view(request):
 @login_required(login_url="login")
 def settings_view(request):
     return render(request, TEMPLATE, {
-        "page_title": "System settings",
+        "page_title": "System Settings",
         "active": "settings",
     })
 
@@ -1172,3 +1174,165 @@ def reports_provider_csv(request, provider_id: int):
 # ===== Fin: Reports/Generar reportes por Proveedor =====
 
 # ===== Fin: Reports/Generar reportes =====
+
+
+# ===== Inicio: Batch/Historial y filtros =====
+
+def _to_int(val, default=None):
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_pct(num: int, den: int) -> float:
+    if den <= 0:
+        return 0.0
+    return round((num / den) * 100.0, 2)
+
+
+@login_required(login_url="login")
+def batch_metrics_summary_api(request):
+
+    now = timezone.localtime(timezone.now())
+    year = _to_int(request.GET.get("year"), now.year)
+    month = _to_int(request.GET.get("month"))
+    provider_id = _to_int(request.GET.get("provider"))
+    status = (request.GET.get("status") or "").strip().lower()   # draft | evaluated | all | ""
+    search = (request.GET.get("search") or "").strip()
+    selected_code = (request.GET.get("selected") or "").strip()
+    limit = _to_int(request.GET.get("limit"), 50)
+    limit = max(1, min(limit, 1500))
+
+    # regla del módulo
+    if year < 2024:
+        year = 2024
+
+    # Query base lotes
+    qs = (
+        Batch.objects
+        .select_related("provider")
+        .select_related("evaluation")
+        .all()
+        .order_by("-created_at", "-id")
+    )
+
+    # año siempre aplica
+    qs = qs.filter(created_at__year=year)
+
+    if month:
+        if month < 1 or month > 12:
+            return JsonResponse({"ok": False, "error": "month debe estar entre 1 y 12."}, status=400)
+        qs = qs.filter(created_at__month=month)
+
+    if provider_id:
+        qs = qs.filter(provider_id=provider_id)
+
+    if search:
+        qs = qs.filter(code__icontains=search)
+
+    if status in ("evaluated", "evaluado"):
+        qs = qs.filter(evaluation__isnull=False)
+    elif status in ("draft", "borrador"):
+        qs = qs.filter(evaluation__isnull=True)
+
+
+    # KPIs
+    total_batches = qs.count()
+
+    evaluated_qs = qs.filter(evaluation__isnull=False)
+    evaluated_batches = evaluated_qs.count()
+
+    total_weight_kg = evaluated_qs.aggregate(s=Sum("weight_kg"))["s"] or Decimal("0")
+
+    # calidad: grado 1-2
+    accepted = evaluated_qs.filter(evaluation__grade__in=[1, 2]).count()
+
+    quality_pct = _safe_pct(accepted, evaluated_batches)
+    rejection_pct = round(100.0 - quality_pct, 2) if evaluated_batches else 0.0
+
+    kpis = {
+        "total_batches": total_batches,
+        "evaluated_batches": evaluated_batches,
+        "total_weight_kg": float(round(total_weight_kg, 3)),
+        "quality_pct": quality_pct,
+        "rejection_pct": rejection_pct,
+    }
+
+
+    # Tabla lista de lotes
+    batches = []
+    for b in qs[:limit]:
+        ev = b.evaluation if hasattr(b, "evaluation") else None
+        provider_name = str(b.provider) if b.provider_id else None
+
+        batches.append({
+            "id": b.id,
+            "code": b.code,
+            "provider": {"id": b.provider_id, "name": provider_name},
+            "weight_kg": float(b.weight_kg),
+            "status": b.status,
+            "created_at": b.created_at.isoformat(),
+            "evaluation": None if not ev else {
+                "method": ev.method,
+                "grade": ev.grade,
+                "score": float(ev.score) if ev.score is not None else None,
+                "primary_total": ev.primary_total,
+                "secondary_total": ev.secondary_total,
+                "defects_total": ev.defects_total,
+                "created_at": ev.created_at.isoformat(),
+            }
+        })
+
+    # Panel detalle
+    detail = None
+    if selected_code:
+        b = qs.filter(code=selected_code).first()
+        if b:
+            ev = b.evaluation if hasattr(b, "evaluation") else None
+            provider_name = str(b.provider) if b.provider_id else None
+            detail = {
+                "id": b.id,
+                "code": b.code,
+                "provider": {
+                    "id": b.provider_id,
+                    "name": provider_name,
+                    "contact": b.provider.contact if b.provider_id else None,
+                },
+                "weight_kg": float(b.weight_kg),
+                "status": b.status,
+                "created_at": b.created_at.isoformat(),
+                "evaluation": None if not ev else {
+                    "method": ev.method,
+                    "grade": ev.grade,
+                    "score": float(ev.score) if ev.score is not None else None,
+                    "primary_total": ev.primary_total,
+                    "secondary_total": ev.secondary_total,
+                    "defects_total": ev.defects_total,
+                    "counts": ev.counts,
+                    "created_at": ev.created_at.isoformat(),
+                }
+            }
+
+    # filtros aplica
+    provider_obj = Provider.objects.filter(id=provider_id).first() if provider_id else None
+    filters_applied = {
+        "year": year,
+        "month": month,
+        "provider": None if not provider_obj else {"id": provider_obj.id, "name": str(provider_obj)},
+        "status": status or "all",
+        "search": search or None,
+        "selected": selected_code or None,
+        "limit": limit,
+    }
+
+    return JsonResponse({
+        "ok": True,
+        "kpis": kpis,
+        "filters_applied": filters_applied,
+        "batches": batches,
+        "detail": detail,
+    })
+
+# ===== Fin: Batch/Historial y filtros =====
+
