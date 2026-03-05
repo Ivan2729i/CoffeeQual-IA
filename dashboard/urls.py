@@ -18,6 +18,7 @@ urlpatterns = [
     path("quality/evaluate/", views.evaluate_image, name="quality_evaluate"),
     path("quality/batch/<int:batch_id>/", views.quality_batch_detail, name="quality_batch_detail"),
     path("batch/", views.batch_metrics_view, name="batch"),
+    path("api/batch-metrics/summary/", views.batch_metrics_summary_api, name="batch_metrics_summary_api"),
     path("packaging/", views.packaging_view, name="packaging"),
     path("activity/", views.activity_log_view, name="activity"),
     path("reports/", views.reports_view, name="reports"),
