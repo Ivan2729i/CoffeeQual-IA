@@ -2,6 +2,7 @@ import cv2
 import time
 
 url = "rtsp://192.168.100.10:8554/live/gopro"
+#url = "rtmp://itverland.com/live/stream"
 
 print("Conectando al stream...")
 

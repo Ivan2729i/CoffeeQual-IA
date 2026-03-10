@@ -32,6 +32,7 @@
   let pollTimer = null;
   let lastState = null;
   let hasPolledOnce = false;
+  let startingLive = false;
 
   // ========= TOASTS =========
   const AUTO_CLOSE_MS = 2600;
@@ -113,6 +114,18 @@
   function setAnnotated() {
     if (!img || !imgUrl) return;
     img.src = `${imgUrl}?t=${Date.now()}`;
+  }
+
+  function clearImg() {
+      if (!img) return;
+      img.removeAttribute("src");
+  }
+
+  function setAnnotatedWithRetry(delay = 400) {
+      setTimeout(() => {
+        if (!img || !imgUrl) return;
+        img.src = `${imgUrl}?t=${Date.now()}`;
+      }, delay);
   }
 
   function isPreviewSrc() {
@@ -215,7 +228,7 @@
       btnSave.classList.add("hidden");
       btnSave.disabled = true;
 
-      setPreview();
+      if (!img.src || !isPreviewSrc()) setPreview();
       setSummaryEmpty("Inicia una evaluación para ver resultados.");
       return;
     }
@@ -227,7 +240,6 @@
       btnSave.classList.add("hidden");
       btnSave.disabled = true;
 
-      if (!img.src || isPreviewSrc()) setAnnotated();
       return;
     }
 
@@ -238,7 +250,6 @@
       btnSave.classList.remove("hidden");
       btnSave.disabled = false;
 
-      if (!img.src || isPreviewSrc()) setAnnotated();
       renderFinal(j.final);
       return;
     }
@@ -251,59 +262,72 @@
       btnSave.disabled = true;
 
       // vuelve a preview para que no quede negro
-      setPreview();
+      if (!img.src || !isPreviewSrc()) setPreview();
       setSummaryEmpty(`Error: ${j.error || "desconocido"}`);
       return;
     }
   }
 
   btnStart?.addEventListener("click", async () => {
-    if (!csrf) {
-      notify("error", "CSRF no encontrado. Revisa tu template.");
-      return;
-    }
+      if (!csrf) {
+        notify("error", "CSRF no encontrado. Revisa tu template.");
+        return;
+      }
 
-    notify("info", "Iniciando detección en vivo...");
-    setSummaryEmpty("Detectando...");
-    setBadge("running");     // visual instantáneo
-    setAnnotated();          // cambia a stream anotado ya
+      startingLive = true;
+      notify("info", "Iniciando detección en vivo...");
+      setSummaryEmpty("Detectando...");
+      setBadge("running");
 
-    const j = await post(urlStart, {
-      cam_id: camId,
-      batch_id: batchId,
-      csrfmiddlewaretoken: csrf,
-    });
+      clearImg();
 
-    if (j.already_evaluated) {
-      notify("warning", "Este lote ya fue evaluado.");
-      window.location.reload();
-      return;
-    }
+      await new Promise(resolve => setTimeout(resolve, 800));
 
-    if (!j.ok) {
-      notify("error", j.error || "No se pudo iniciar la detección.");
-      setBadge("error");
-      setPreview();
-      setSummaryEmpty(j.error || "No se pudo iniciar.");
-      return;
-    }
+      const j = await post(urlStart, {
+        cam_id: camId,
+        batch_id: batchId,
+        csrfmiddlewaretoken: csrf,
+      });
 
-    await poll();
+      if (j.already_evaluated) {
+        startingLive = false;
+        notify("warning", "Este lote ya fue evaluado.");
+        window.location.reload();
+        return;
+      }
+
+      if (!j.ok) {
+        startingLive = false;
+        notify("error", j.error || "No se pudo iniciar la detección.");
+        setBadge("error");
+        setPreview();
+        setSummaryEmpty(j.error || "No se pudo iniciar.");
+        return;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setAnnotatedWithRetry(0);
+      startingLive = false;
+      await poll();
   });
 
   btnStop?.addEventListener("click", async () => {
-    if (!csrf) return;
+      if (!csrf) return;
 
-    notify("warning", "Deteniendo detección...");
+      notify("warning", "Deteniendo detección...");
 
-    // vuelve a preview inmediato
-    setBadge("idle");
-    setPreview();
+      const j = await post(urlStop, { cam_id: camId, csrfmiddlewaretoken: csrf });
 
-    const j = await post(urlStop, { cam_id: camId, csrfmiddlewaretoken: csrf });
-    if (!j.ok) notify("error", j.error || "No se pudo detener.");
+      if (!j.ok) {
+        notify("error", j.error || "No se pudo detener.");
+        return;
+      }
 
-    await poll();
+      setBadge("idle");
+      setPreview();
+      setSummaryEmpty("Inicia una evaluación para ver resultados.");
+
+      await poll();
   });
 
   btnSave?.addEventListener("click", async () => {
@@ -323,6 +347,15 @@
     notify("error", j.error || "No se pudo guardar.");
     btnSave.disabled = false;
   });
+
+  if (img) {
+      img.onerror = () => {
+        // si el stream anotado falla al primer intento, reintenta
+        if (badge?.textContent === "DETECTING" || badge?.textContent === "FINISHED") {
+          setAnnotatedWithRetry(700);
+        }
+      };
+  }
 
   // ===== INIT =====
   setBadge("idle");

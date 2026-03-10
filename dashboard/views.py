@@ -13,14 +13,11 @@ from .models import Batch, Provider, Evaluation
 from .forms import ProviderForm, BatchCreateForm
 from django.http import StreamingHttpResponse, HttpResponse
 import cv2
-import time
 from django.http import StreamingHttpResponse
 from django.core.cache import cache
 import time
 from inference.live_session import LiveEvalSession
-from dataclasses import dataclass
 from datetime import date
-from typing import Dict, List
 from django.db.models import Count, Sum, IntegerField, Case, When
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
@@ -32,6 +29,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 from decimal import Decimal
 from django.db.models import Sum, Q
+from .camera_hub import get_camera_worker
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -362,44 +360,46 @@ def quality_batch_detail(request, batch_id: int):
 # ========= Fin: Quality =============
 
 
-# ===== Inicio: Camera streaming (MJPEG) =====
+## ===== Inicio: Camera streaming (MJPEG) =====
 
-CAMERA_RTSP = {
-    "cam1": "rtsp://192.168.100.10:8554/live/gopro",  # GoPro actual la ip cambia cada vez
-    "cam2": None,  # futura cámara
+# Selector simple:
+# - type="device": usa índice de cámara (Iriun / webcam USB)
+# - type="rtsp": (GoPro) -> COMENTADO por ahora
+CAMERA_SOURCES = {
+    "cam1": {"type": "device", "index": 1},  # Iriun (teléfono) - cambia 0/1/2 según tu PC
+    "cam2": {"type": "device", "index": 0},  # webcam (mañana probablemente)
+    # "cam_gopro": {"type": "rtsp", "url": "rtsp://192.168.100.10:8554/live/gopro"},  # GoPro
 }
 
-def _mjpeg_generator(rtsp_url: str):
-    cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-
-    # reintenta si no abre
-    while not cap.isOpened():
-        time.sleep(1)
-        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+def _mjpeg_generator(cam_id: str, source: dict):
+    worker = get_camera_worker(cam_id, source)
 
     while True:
-        ok, frame = cap.read()
-        if not ok:
+        frame = worker.get_frame()
+        if frame is None:
             time.sleep(0.05)
             continue
 
         ok, jpg = cv2.imencode(".jpg", frame)
         if not ok:
+            time.sleep(0.02)
             continue
 
-        yield (b"--frame\r\n"
-               b"Content-Type: image/jpeg\r\n\r\n" + jpg.tobytes() + b"\r\n")
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n" + jpg.tobytes() + b"\r\n"
+        )
 
 
 @login_required(login_url="login")
 def camera_stream(request, cam_id: str):
-    rtsp_url = CAMERA_RTSP.get(cam_id)
+    src = CAMERA_SOURCES.get(cam_id)
 
-    if not rtsp_url:
+    if not src:
         return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=404)
 
     return StreamingHttpResponse(
-        _mjpeg_generator(rtsp_url),
+        _mjpeg_generator(cam_id, src),
         content_type="multipart/x-mixed-replace; boundary=frame"
     )
 
@@ -410,36 +410,62 @@ def camera_stream(request, cam_id: str):
 LIVE_SESSIONS = {}
 
 # reutiliza mapeo RTSP
-CAMERA_RTSP = {
-    "cam1": "rtsp://192.168.100.10:8554/live/gopro", # cambia la ip cada vez que se pruebe
-    "cam2": None,
-}
+#CAMERA_RTSP = {
+#    "cam1": "rtsp://192.168.100.10:8554/live/gopro", # cambia la ip cada vez que se pruebe
+#    "cam2": None,
+#}
 
 @login_required(login_url="login")
 def live_annotated_stream(request, cam_id: str):
     """
     Stream MJPEG del frame anotado por la sesión (cajas+labels+ID).
-    Si no hay sesión corriendo, devuelve 404 para que UI muestre placeholder.
+    Si aún no hay frame anotado disponible, usa temporalmente el frame normal
+    desde camera_hub para que no se vea negro.
     """
     sess: LiveEvalSession | None = LIVE_SESSIONS.get(cam_id)
     if not sess or sess.status()["state"] not in ("running", "finished"):
         return JsonResponse({"ok": False, "error": "No hay sesión activa."}, status=404)
 
+    src = CAMERA_SOURCES.get(cam_id)
+    worker = get_camera_worker(cam_id, src) if src else None
+
     def gen():
         while True:
             st = sess.status()["state"]
             jpg = sess.get_latest_jpeg()
+
+            # 1) si ya existe frame anotado, úsalo
             if jpg:
-                yield (b"--frame\r\n"
-                       b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
+                )
             else:
+                # 2) si aún no hay frame anotado, usa preview normal del hub
+                frame = worker.get_frame() if worker else None
+                if frame is not None:
+                    ok, fallback_jpg = cv2.imencode(".jpg", frame)
+                    if ok:
+                        yield (
+                            b"--frame\r\n"
+                            b"Content-Type: image/jpeg\r\n\r\n" + fallback_jpg.tobytes() + b"\r\n"
+                        )
+                    else:
+                        time.sleep(0.05)
+                else:
+                    time.sleep(0.05)
+
+            if st == "error":
+                break
+
+            if st == "finished":
                 time.sleep(0.05)
 
-            # si terminó, seguimos emitiendo el último frame unos segundos o hasta que el navegador cierre
-            if st in ("finished", "error"):
-                time.sleep(0.05)
+    return StreamingHttpResponse(
+        gen(),
+        content_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
-    return StreamingHttpResponse(gen(), content_type="multipart/x-mixed-replace; boundary=frame")
 
 @login_required(login_url="login")
 @require_POST
@@ -467,9 +493,13 @@ def live_start(request):
             "counts": ev.counts,
         })
 
-    rtsp = CAMERA_RTSP.get(cam_id)
-    if not rtsp:
+    src = CAMERA_SOURCES.get(cam_id)
+    if not src:
         return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=400)
+
+    # GoPro deshabilitada por ahora
+    if src.get("type") == "rtsp":
+        return JsonResponse({"ok": False, "error": "GoPro deshabilitada por ahora."}, status=400)
 
     # crea / reinicia sesión
     old = LIVE_SESSIONS.get(cam_id)
@@ -480,11 +510,12 @@ def live_start(request):
             pass
 
     sess = LiveEvalSession(
-        rtsp_url=rtsp,
+        cam_id=cam_id,
+        source_config=src,
         duration_s=30,
-        conf_display=0.35,
-        conf_count=0.50,
-        min_frames_confirm=5,
+        conf_display=0.25,
+        conf_count=0.40,
+        # min_frames_confirm=6,
         tracker_cfg="bytetrack.yaml",
     )
     sess.batch_id = int(batch.id)  # amarra la sesión al lote

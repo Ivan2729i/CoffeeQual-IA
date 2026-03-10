@@ -1,73 +1,65 @@
 import time
 import threading
 from dataclasses import dataclass, field
-from collections import Counter, defaultdict
+from collections import Counter
 import cv2
 from inference.predictor import get_model
 from inference.grading import grade_from_counts
+from dashboard.camera_hub import get_camera_worker
 
 
 @dataclass
-class TrackStat:
-    frames_seen: int = 0
-    max_conf: float = 0.0
-    votes: Counter = field(default_factory=Counter)
+class FrameStat:
+    counts: Counter = field(default_factory=Counter)
+    total_conf: float = 0.0
+    detections: int = 0
 
-    def update(self, cls_name: str, conf: float):
-        self.frames_seen += 1
-        if conf > self.max_conf:
-            self.max_conf = conf
-        self.votes[cls_name] += 1
-
-    def final_class(self) -> str | None:
-        if not self.votes:
-            return None
-        return self.votes.most_common(1)[0][0]
+    def score(self) -> float:
+        if self.detections <= 0:
+            return 0.0
+        return self.total_conf
 
 
 class LiveEvalSession:
     """
     Sesión de evaluación en vivo para 1 cámara:
-    - Lee RTSP
-    - Corre YOLO+ByteTrack
+    - Lee frames desde camera_hub
+    - Corre YOLO (sin tracking)
+    - Deduplica cajas por solapamiento en cada frame
+    - Se queda con el mejor conteo observado durante la sesión
     - Produce frame anotado (para MJPEG)
-    - Produce conteos por ID únicos confirmados
-    - Termina automáticamente a los N segundos (default 30)
     """
 
     def __init__(
         self,
-        rtsp_url: str,
-        duration_s: int = 30,
-        conf_display: float = 0.35,
-        conf_count: float = 0.50,
-        min_frames_confirm: int = 5,
-        tracker_cfg: str = "bytetrack.yaml",
+        cam_id: str,
+        source_config: dict,
+        duration_s: int = 15,
+        conf_display: float = 0.22,
+        conf_count: float = 0.30,
+        tracker_cfg: str = "bytetrack.yaml",  # se deja por compatibilidad, pero no se usa
     ):
-        self.rtsp_url = rtsp_url
+        self.cam_id = cam_id
+        self.source_config = source_config
         self.duration_s = duration_s
         self.conf_display = conf_display
         self.conf_count = conf_count
-        self.min_frames_confirm = min_frames_confirm
         self.tracker_cfg = tracker_cfg
 
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop_flag = False
 
-        # Estado público
-        self.state = "idle"  # idle | running | finished | error
+        self.state = "idle"
         self.started_at = None
         self.ends_at = None
         self.error = None
 
-        self.latest_jpeg: bytes | None = None  # frame anotado
-        self.latest_preview_counts: dict = {"primary": {}, "secondary": {}}
-        self.final_payload: dict | None = None  # lo que se guarda al terminar
+        self.latest_jpeg: bytes | None = None
+        self.final_payload: dict | None = None
 
-        # tracking data
-        self._tracks: dict[int, TrackStat] = defaultdict(TrackStat)
-        self._counted_ids: set[int] = set()  # IDs ya contados (cuando cumplen las reglas)
+        self._best_frame_stat = FrameStat()
+        self._best_counts: Counter = Counter()
 
     def is_running(self) -> bool:
         with self._lock:
@@ -80,9 +72,9 @@ class LiveEvalSession:
             self._stop_flag = False
             self.error = None
             self.final_payload = None
-            self._tracks.clear()
-            self._counted_ids.clear()
             self.latest_jpeg = None
+            self._best_frame_stat = FrameStat()
+            self._best_counts = Counter()
             self.state = "running"
             self.started_at = time.time()
             self.ends_at = self.started_at + self.duration_s
@@ -112,49 +104,69 @@ class LiveEvalSession:
         with self._lock:
             return self.latest_jpeg
 
-    def _finalize_counts(self) -> dict:
+    def _cls_name(self, names, cls_id: int) -> str:
+        if isinstance(names, dict):
+            return names.get(cls_id, str(cls_id))
+        if isinstance(names, list):
+            if 0 <= cls_id < len(names):
+                return names[cls_id]
+        return str(cls_id)
+
+    def _iou(self, a, b):
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+
+        inter_x1 = max(ax1, bx1)
+        inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2)
+        inter_y2 = min(ay2, by2)
+
+        inter_w = max(0, inter_x2 - inter_x1)
+        inter_h = max(0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+
+        area_a = max(1, (ax2 - ax1)) * max(1, (ay2 - ay1))
+        area_b = max(1, (bx2 - bx1)) * max(1, (by2 - by1))
+
+        union = area_a + area_b - inter_area
+        return inter_area / union if union > 0 else 0.0
+
+    def _dedupe_packed(self, packed, iou_thr=0.45):
         """
-        Aplica reglas:
-        - frames_seen >= min_frames_confirm
-        - max_conf >= conf_count (al menos una vez)
-        - 1 vez por ID
-        - clase final = voto mayoritario
+        packed: [x1, y1, x2, y2, conf, cls_id]
+        deja solo la caja de mayor confianza cuando hay mucho solapamiento
         """
-        counts = Counter()
+        packed = sorted(packed, key=lambda x: x[4], reverse=True)
+        kept = []
 
-        for tid, st in self._tracks.items():
-            if st.frames_seen < self.min_frames_confirm:
-                continue
-            if st.max_conf < self.conf_count:
-                continue
+        for cand in packed:
+            cbox = cand[:4]
+            should_keep = True
 
-            cls = st.final_class()
-            if not cls:
-                continue
+            for prev in kept:
+                pbox = prev[:4]
+                if self._iou(cbox, pbox) >= iou_thr:
+                    should_keep = False
+                    break
 
-            counts[cls] += 1
+            if should_keep:
+                kept.append(cand)
 
-        grading = grade_from_counts(dict(counts))
-        payload = {
-            "counts": dict(counts),
-            **grading,
-        }
-        return payload
+        return kept
 
     def _draw_boxes(self, frame, boxes, names):
-        """
-        Dibujo propio para asegurar etiquetas con ID + clase + conf.
-        """
         h, w = frame.shape[:2]
+
         for b in boxes:
-            x1, y1, x2, y2, conf, cls_id, tid = b
+            x1, y1, x2, y2, conf, cls_id = b
+
             x1 = max(0, min(int(x1), w - 1))
             y1 = max(0, min(int(y1), h - 1))
             x2 = max(0, min(int(x2), w - 1))
             y2 = max(0, min(int(y2), h - 1))
 
-            cls_name = names.get(int(cls_id), str(int(cls_id)))
-            label = f"#{int(tid)} {cls_name} {conf:.2f}"
+            cls_name = self._cls_name(names, int(cls_id))
+            label = f"{cls_name} {conf:.2f}"
 
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(
@@ -167,24 +179,47 @@ class LiveEvalSession:
                 2,
                 cv2.LINE_AA,
             )
+
         return frame
+
+    def _counts_from_packed(self, packed, names):
+        counts = Counter()
+        total_conf = 0.0
+        detections = 0
+
+        for x1, y1, x2, y2, conf, cls_id in packed:
+            if conf < self.conf_count:
+                continue
+            cls_name = self._cls_name(names, int(cls_id))
+            counts[cls_name] += 1
+            total_conf += float(conf)
+            detections += 1
+
+        stat = FrameStat(counts=counts, total_conf=total_conf, detections=detections)
+        return stat
+
+    def _finalize_counts(self) -> dict:
+        counts = dict(self._best_counts)
+        grading = grade_from_counts(counts)
+        payload = {
+            "counts": counts,
+            **grading,
+        }
+        return payload
 
     def _run_loop(self):
         try:
             model = get_model()
             names = model.names
 
-            cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+            worker = get_camera_worker(self.cam_id, self.source_config)
             t0 = time.time()
 
-            # reintenta apertura
-            while not cap.isOpened():
-                time.sleep(0.5)
-                cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+            while worker.get_frame() is None:
+                time.sleep(0.2)
                 if time.time() - t0 > 10:
-                    raise RuntimeError("No se pudo abrir RTSP (timeout).")
+                    raise RuntimeError("No se pudo obtener frame de la cámara (timeout).")
 
-            # tracking persistente
             while True:
                 with self._lock:
                     if self._stop_flag:
@@ -192,68 +227,73 @@ class LiveEvalSession:
                     if self.ends_at and time.time() >= self.ends_at:
                         break
 
-                ok, frame = cap.read()
-                if not ok:
+                frame = worker.get_frame()
+                if frame is None:
                     time.sleep(0.02)
                     continue
 
-                # YOLO TRACK: conf_display para overlay/detección en frame
-                # ByteTrack mantiene IDs
-                results = model.track(
+                drawn = frame.copy()
+
+                results = model.predict(
                     source=frame,
                     conf=self.conf_display,
-                    persist=True,
-                    tracker=self.tracker_cfg,
                     verbose=False,
                 )
+
+                if not results:
+                    ok2, jpg = cv2.imencode(".jpg", drawn)
+                    if ok2:
+                        with self._lock:
+                            self.latest_jpeg = jpg.tobytes()
+                    continue
 
                 r0 = results[0]
                 boxes = r0.boxes
 
-                # Si no hay detecciones, igual emitimos frame
-                drawn = frame.copy()
+                packed = []
 
                 if boxes is not None and boxes.xyxy is not None and len(boxes) > 0:
                     xyxy = boxes.xyxy.cpu().numpy()
                     confs = boxes.conf.cpu().numpy()
                     clss = boxes.cls.cpu().numpy()
 
-                    # ids pueden venir None si el tracker aún no asigna
-                    ids = None
-                    if getattr(boxes, "id", None) is not None:
-                        ids = boxes.id.cpu().numpy()
-
-                    packed = []
                     for i in range(len(xyxy)):
-                        if ids is None or ids[i] is None:
-                            continue
-
                         x1, y1, x2, y2 = xyxy[i]
                         conf = float(confs[i])
                         cls_id = int(clss[i])
-                        tid = int(ids[i])
 
-                        cls_name = names.get(cls_id, str(cls_id))
+                        w_box = max(1, x2 - x1)
+                        h_box = max(1, y2 - y1)
+                        area = w_box * h_box
 
-                        # stats para conteo
-                        st = self._tracks[tid]
-                        st.update(cls_name, conf)
+                        if area > 9000:
+                            continue
 
-                        packed.append([x1, y1, x2, y2, conf, cls_id, tid])
+                        packed.append([x1, y1, x2, y2, conf, cls_id])
 
-                    # dibuja cajas con ID
-                    if packed:
-                        drawn = self._draw_boxes(drawn, packed, names)
+                if packed:
+                    packed = self._dedupe_packed(packed, iou_thr=0.45)
+                    drawn = self._draw_boxes(drawn, packed, names)
 
-                # Comprime a JPG para MJPEG
+                    frame_stat = self._counts_from_packed(packed, names)
+
+                    # guarda el mejor frame de la sesión:
+                    # prioriza más detecciones; en empate, mayor suma de confianza
+                    best_det = self._best_frame_stat.detections
+                    cur_det = frame_stat.detections
+
+                    if (
+                        cur_det > best_det
+                        or (cur_det == best_det and frame_stat.score() > self._best_frame_stat.score())
+                    ):
+                        self._best_frame_stat = frame_stat
+                        self._best_counts = frame_stat.counts.copy()
+
                 ok2, jpg = cv2.imencode(".jpg", drawn)
                 if ok2:
                     with self._lock:
                         self.latest_jpeg = jpg.tobytes()
 
-            cap.release()
-
-            # Finaliza resultados
             final_payload = self._finalize_counts()
             with self._lock:
                 self.final_payload = final_payload
@@ -263,4 +303,3 @@ class LiveEvalSession:
             with self._lock:
                 self.error = str(e)
                 self.state = "error"
-

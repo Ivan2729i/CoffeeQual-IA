@@ -1,20 +1,21 @@
 import cv2
 
-# La GoPro suele ser VideoCapture(0) o 1
-cap = cv2.VideoCapture(1)
+# URL HLS, usa local si estás en la misma VM
+hls_url = "http://itverland.com:8080/hls/stream.m3u8"
+
+cap = cv2.VideoCapture(hls_url)
 
 if not cap.isOpened():
-    cap = cv2.VideoCapture(1)
-
-if not cap.isOpened():
-    raise RuntimeError("No se pudo abrir la cámara USB")
+    raise RuntimeError("No se pudo abrir el stream HLS")
 
 while True:
     ret, frame = cap.read()
-    if ret:
-        cv2.imshow("GoPro USB Live", frame)
+    if not ret:
+        print("No hay más frames, esperando...")
+        cv2.waitKey(1000)  # espera 1s y vuelve a intentar
+        continue
 
-    # Presiona 'q' para salir
+    cv2.imshow("HLS Stream", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
