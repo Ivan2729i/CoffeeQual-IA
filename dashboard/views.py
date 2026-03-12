@@ -1,7 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 from django.views.decorators.csrf import csrf_protect
 from inference.analyze import analyze_image
 import os
@@ -9,7 +9,7 @@ import tempfile
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
-from .models import Batch, Provider, Evaluation
+from .models import Batch, Provider, Evaluation, Packing
 from .forms import ProviderForm, BatchCreateForm
 from django.http import StreamingHttpResponse, HttpResponse
 import cv2
@@ -30,6 +30,7 @@ from reportlab.lib.units import inch
 from decimal import Decimal
 from django.db.models import Sum, Q
 from .camera_hub import get_camera_worker
+import json
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -71,9 +72,12 @@ def batch_metrics_view(request):
 
 @login_required(login_url="login")
 def packaging_view(request):
+    providers = Provider.objects.order_by("first_name", "last_name")
+
     return render(request, TEMPLATE, {
         "page_title": "Packaging and Distribution",
         "active": "packaging",
+        "providers": providers,
     })
 
 
@@ -1366,4 +1370,235 @@ def batch_metrics_summary_api(request):
     })
 
 # ===== Fin: Batch/Historial y filtros =====
+
+# ===== Inicio: Packing/Registro y control =====
+# Resumen
+@login_required(login_url="login")
+@require_GET
+def packaging_summary_api(request):
+    today = date.today()
+
+    evaluated_batches = Batch.objects.filter(status=Batch.STATUS_EVALUATED)
+
+    pending_batches = evaluated_batches.filter(packing__isnull=True) | evaluated_batches.filter(
+        packing__status=Packing.STATUS_PENDING
+    )
+
+    pending_count = pending_batches.distinct().count()
+    pending_kg = pending_batches.distinct().aggregate(total=Sum("weight_kg"))["total"] or 0
+
+    packed_today_count = Packing.objects.filter(
+        packed_at=today
+    ).count()
+
+    packed_kg = Packing.objects.filter(
+        status__in=[Packing.STATUS_PACKED, Packing.STATUS_SENT]
+    ).aggregate(total=Sum("batch__weight_kg"))["total"] or 0
+
+    return JsonResponse({
+        "success": True,
+        "summary": {
+            "pending_lots": pending_count,
+            "packed_today": packed_today_count,
+            "pending_kg": float(pending_kg),
+            "packed_kg": float(packed_kg),
+        }
+    })
+
+
+# Lista con filtros
+@login_required(login_url="login")
+@require_GET
+def packaging_list_api(request):
+    today = date.today()
+
+    qs = (
+        Batch.objects
+        .filter(status=Batch.STATUS_EVALUATED)
+        .select_related("provider", "evaluation", "packing")
+        .order_by("created_at", "id")
+    )
+
+    rows = []
+
+    for batch in qs:
+        try:
+            packing = batch.packing
+            packing_status = packing.status
+            packing_status_label = packing.get_status_display()
+            packed_at = packing.packed_at.isoformat() if packing.packed_at else None
+            sent_at = packing.sent_at.isoformat() if packing.sent_at else None
+            notes = packing.notes or ""
+        except Packing.DoesNotExist:
+            packing = None
+            packing_status = Packing.STATUS_PENDING
+            packing_status_label = "Pendiente"
+            packed_at = None
+            sent_at = None
+            notes = ""
+
+        evaluation = batch.evaluation if hasattr(batch, "evaluation") else None
+
+        pending_days = None
+        if packing_status == Packing.STATUS_PENDING:
+            pending_days = (today - batch.created_at.date()).days
+
+        rows.append({
+            "batch_id": batch.id,
+            "code": batch.code,
+            "provider": {
+                "id": batch.provider.id,
+                "name": str(batch.provider),
+            },
+            "weight_kg": float(batch.weight_kg),
+            "created_at": batch.created_at.strftime("%Y-%m-%d %H:%M"),
+            "created_date": batch.created_at.date().isoformat(),
+            "grade": evaluation.grade if evaluation else None,
+            "packing_status": packing_status,
+            "packing_status_label": packing_status_label,
+            "packed_at": packed_at,
+            "sent_at": sent_at,
+            "notes": notes,
+            "pending_days": pending_days,
+        })
+
+    return JsonResponse({
+        "success": True,
+        "count": len(rows),
+        "results": rows,
+    })
+
+
+# Detalle
+@login_required(login_url="login")
+@require_GET
+def packaging_detail_api(request, batch_id):
+    batch = get_object_or_404(
+        Batch.objects.select_related("provider", "evaluation"),
+        pk=batch_id,
+        status=Batch.STATUS_EVALUATED,
+    )
+
+    packing, _ = Packing.objects.get_or_create(batch=batch)
+    evaluation = batch.evaluation if hasattr(batch, "evaluation") else None
+
+    primary_counts = {}
+    secondary_counts = {}
+
+    if evaluation and evaluation.counts:
+        primary_counts = evaluation.counts.get("primary", {}) or {}
+        secondary_counts = evaluation.counts.get("secondary", {}) or {}
+
+    return JsonResponse({
+        "success": True,
+        "detail": {
+            "batch": {
+                "id": batch.id,
+                "code": batch.code,
+                "weight_kg": float(batch.weight_kg),
+                "created_at": batch.created_at.strftime("%Y-%m-%d %H:%M"),
+                "status": batch.status,
+                "status_label": batch.get_status_display(),
+            },
+            "provider": {
+                "id": batch.provider.id,
+                "name": str(batch.provider),
+                "contact": batch.provider.contact,
+            },
+            "evaluation": {
+                "method": evaluation.method if evaluation else None,
+                "method_label": evaluation.get_method_display() if evaluation else None,
+                "grade": evaluation.grade if evaluation else None,
+                "primary_total": evaluation.primary_total if evaluation else 0,
+                "secondary_total": evaluation.secondary_total if evaluation else 0,
+                "defects_total": evaluation.defects_total if evaluation else 0,
+                "primary_counts": primary_counts,
+                "secondary_counts": secondary_counts,
+                "created_at": evaluation.created_at.strftime("%Y-%m-%d %H:%M") if evaluation else None,
+            },
+            "packing": {
+                "status": packing.status,
+                "status_label": packing.get_status_display(),
+                "packed_at": packing.packed_at.isoformat() if packing.packed_at else None,
+                "sent_at": packing.sent_at.isoformat() if packing.sent_at else None,
+                "notes": packing.notes or "",
+            }
+        }
+    })
+
+
+# Update
+@login_required(login_url="login")
+@require_http_methods(["PATCH", "POST"])
+def packaging_update_api(request, batch_id):
+    batch = get_object_or_404(
+        Batch.objects.select_related("provider", "evaluation"),
+        pk=batch_id,
+        status=Batch.STATUS_EVALUATED,
+    )
+
+    packing, _ = Packing.objects.get_or_create(batch=batch)
+
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "success": False,
+            "message": "JSON inválido."
+        }, status=400)
+
+    status_value = (payload.get("status") or "").strip()
+    notes = (payload.get("notes") or "").strip()
+
+    valid_statuses = {
+        Packing.STATUS_PENDING,
+        Packing.STATUS_PACKED,
+        Packing.STATUS_SENT,
+    }
+
+    if status_value not in valid_statuses:
+        return JsonResponse({
+            "success": False,
+            "message": "Estado de packing inválido."
+        }, status=400)
+
+    today = date.today()
+
+    packing.status = status_value
+    packing.notes = notes
+
+    if status_value == Packing.STATUS_PENDING:
+        packing.packed_at = None
+        packing.sent_at = None
+
+    elif status_value == Packing.STATUS_PACKED:
+        packing.packed_at = today
+        packing.sent_at = None
+
+    elif status_value == Packing.STATUS_SENT:
+        if not packing.packed_at:
+            packing.packed_at = today
+        packing.sent_at = today
+
+    try:
+        packing.save()
+    except Exception as e:
+        return JsonResponse({
+            "success": False,
+            "message": f"Error al guardar packing: {e}",
+        }, status=400)
+
+    return JsonResponse({
+        "success": True,
+        "message": "Estado actualizado correctamente.",
+        "packing": {
+            "status": packing.status,
+            "status_label": packing.get_status_display(),
+            "packed_at": packing.packed_at.isoformat() if packing.packed_at else None,
+            "sent_at": packing.sent_at.isoformat() if packing.sent_at else None,
+            "notes": packing.notes or "",
+        }
+    })
+
+# ===== Fin: Packing/Registro y control =====
 

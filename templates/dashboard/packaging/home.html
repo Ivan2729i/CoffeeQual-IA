@@ -1,10 +1,113 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+{% load static %}
 
-</body>
-</html>
+<section id="packaging-module"
+         class="mt-6"
+         data-summary-url="{% url 'dashboard:packaging_summary_api' %}"
+         data-list-url="{% url 'dashboard:packaging_list_api' %}"
+         data-detail-base-url="{% url 'dashboard:packaging_detail_api' 0 %}"
+         data-update-base-url="{% url 'dashboard:packaging_update_api' 0 %}">
+
+  <div class="bg-white rounded-2xl border border-[#efe6df] overflow-hidden">
+
+    <!-- Header -->
+    <div class="px-6 py-5 border-b border-[#efe6df]">
+      <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div>
+          <h3 class="text-xl font-semibold text-[#2b1d16]">Centro de Control de Empaquetado</h3>
+          <p class="mt-1 text-sm text-[#6b4b3e]">
+            Administra el flujo de lotes evaluados y actualiza su estado operativo.
+          </p>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="p-6 max-h-[calc(100vh-210px)] overflow-auto scrollbar-soft space-y-6">
+
+      <!-- KPIs -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div class="rounded-2xl border border-[#efe6df] bg-[#fff] p-4">
+          <div class="text-xs uppercase tracking-wide text-[#8a6a5a]">Pendientes</div>
+          <div id="pk-kpi-pending-lots" class="mt-2 text-3xl font-bold text-[#2b1d16]">0</div>
+        </div>
+
+        <div class="rounded-2xl border border-[#efe6df] bg-[#fff] p-4">
+          <div class="text-xs uppercase tracking-wide text-[#8a6a5a]">Empacados hoy</div>
+          <div id="pk-kpi-packed-today" class="mt-2 text-3xl font-bold text-[#2b1d16]">0</div>
+        </div>
+
+        <div class="rounded-2xl border border-[#efe6df] bg-[#fff] p-4">
+          <div class="text-xs uppercase tracking-wide text-[#8a6a5a]">Kg pendientes</div>
+          <div id="pk-kpi-pending-kg" class="mt-2 text-3xl font-bold text-[#2b1d16]">0</div>
+        </div>
+
+        <div class="rounded-2xl border border-[#efe6df] bg-[#fff] p-4">
+          <div class="text-xs uppercase tracking-wide text-[#8a6a5a]">Kg empacados</div>
+          <div id="pk-kpi-packed-kg" class="mt-2 text-3xl font-bold text-[#2b1d16]">0</div>
+        </div>
+      </div>
+
+      <!-- Workspace -->
+      <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.65fr)_380px] gap-6">
+
+        <!-- Left -->
+        <div class="rounded-2xl border border-[#efe6df] bg-white overflow-hidden">
+          <div class="px-5 py-4 border-b border-[#efe6df]">
+            <h4 class="text-base font-semibold text-[#2b1d16]">Flujo de lotes</h4>
+            <p class="text-sm text-[#6b4b3e] mt-1">
+              Navega por estado y selecciona un lote para trabajar.
+            </p>
+          </div>
+
+          <div class="px-5 pt-4">
+            <div class="inline-flex rounded-xl border border-[#e7ddd5] bg-[#fcf8f5] p-1 gap-1">
+              <button type="button"
+                      class="pk-tab-btn rounded-lg px-4 py-2 text-sm font-semibold transition bg-[#2b1d16] text-white"
+                      data-status="pending">
+                Pendientes <span id="pk-pending-count" class="ml-1 opacity-90">0</span>
+              </button>
+
+              <button type="button"
+                      class="pk-tab-btn rounded-lg px-4 py-2 text-sm font-semibold transition text-[#2b1d16]"
+                      data-status="packed">
+                Empacados <span id="pk-packed-count" class="ml-1 opacity-75">0</span>
+              </button>
+
+              <button type="button"
+                      class="pk-tab-btn rounded-lg px-4 py-2 text-sm font-semibold transition text-[#2b1d16]"
+                      data-status="sent">
+                Enviados <span id="pk-sent-count" class="ml-1 opacity-75">0</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="pk-list-panel" class="p-5">
+            <div id="pk-list"
+                 class="space-y-3 max-h-[560px] overflow-auto scrollbar-soft">
+              <div class="rounded-xl border border-dashed border-[#e8ddd4] bg-[#fcf8f5] px-4 py-8 text-center text-sm text-[#7c5e4f]">
+                Cargando lotes...
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right -->
+        <aside class="rounded-2xl border border-[#efe6df] bg-white overflow-hidden">
+          <div class="px-5 py-4 border-b border-[#efe6df]">
+            <h4 class="text-base font-semibold text-[#2b1d16]">Lote seleccionado</h4>
+            <p class="text-sm text-[#6b4b3e] mt-1">
+              Consulta el detalle y actualiza el estado de packing.
+            </p>
+          </div>
+
+          <div id="pk-detail" class="p-5 max-h-[650px] overflow-auto scrollbar-soft">
+            <div class="min-h-[220px] rounded-2xl border border-dashed border-[#e5d8cf] bg-[#fcf8f5]
+                        flex items-center justify-center text-center px-6 text-sm text-[#7c5e4f]">
+              Selecciona un lote de la lista.
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+</section>

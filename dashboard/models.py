@@ -75,6 +75,12 @@ class Batch(models.Model):
     def is_evaluated(self) -> bool:
         return hasattr(self, "evaluation")
 
+    @property
+    def packing_status(self) -> str | None:
+        if hasattr(self, "packing"):
+            return self.packing.status
+        return None
+
 
 class Evaluation(models.Model):
     METHOD_IMAGE = "image"
@@ -148,3 +154,68 @@ class Evaluation(models.Model):
         super().save(*args, **kwargs)
 
         Batch.objects.filter(pk=self.batch_id).update(status=Batch.STATUS_EVALUATED)
+
+        # Crear packing automático al evaluar el lote
+        Packing.objects.get_or_create(batch=self.batch)
+
+
+class Packing(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_PACKED = "packed"
+    STATUS_SENT = "sent"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pendiente"),
+        (STATUS_PACKED, "Empacado"),
+        (STATUS_SENT, "Enviado"),
+    ]
+
+    batch = models.OneToOneField(
+        Batch,
+        on_delete=models.CASCADE,
+        related_name="packing",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    packed_at = models.DateField(null=True, blank=True)
+    sent_at = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Packing"
+        verbose_name_plural = "Packing"
+        ordering = ["-updated_at"]
+
+    def __str__(self) -> str:
+        return f"Packing {self.batch.code}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if not hasattr(self.batch, "evaluation"):
+            raise ValidationError("Solo se puede crear packing para lotes evaluados.")
+
+        if self.status == self.STATUS_PENDING:
+            self.packed_at = None
+            self.sent_at = None
+
+        if self.status == self.STATUS_PACKED:
+            if not self.packed_at:
+                raise ValidationError("La fecha de empaque es obligatoria cuando el estado es Empacado.")
+            self.sent_at = None
+
+        if self.status == self.STATUS_SENT:
+            if not self.packed_at:
+                raise ValidationError("Para marcar como Enviado, primero debe existir fecha de empaque.")
+            if not self.sent_at:
+                raise ValidationError("La fecha de envío es obligatoria cuando el estado es Enviado.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
