@@ -1,10 +1,119 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+<section id="alerts-module" class="space-y-5">
 
-</body>
-</html>
+  <div class="overflow-hidden rounded-[28px] border border-[#e5d5c9] bg-white/70 shadow-sm">
+    <div class="border-b border-[#ead9cd] px-6 py-6">
+      <h3 class="text-xl font-bold text-[#2b160b]">Resumen de alertas</h3>
+      <p class="mt-1 text-sm text-[#8a6a58]">
+        Consulta el estado actual de eventos críticos y operativos del sistema.
+      </p>
+    </div>
+
+    <div class="space-y-5 px-6 py-6">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="rounded-[22px] border border-[#ead9cd] bg-[#fffaf6] px-5 py-4">
+          <div class="text-xs font-semibold uppercase tracking-wide text-[#a06f55]">
+            Alertas activas
+          </div>
+          <div id="alerts-kpi-total" class="mt-2 text-3xl font-extrabold text-[#2b160b]">0</div>
+        </div>
+
+        <div class="rounded-[22px] border border-[#ead9cd] bg-[#fffaf6] px-5 py-4">
+          <div class="text-xs font-semibold uppercase tracking-wide text-[#a06f55]">
+            No vistas
+          </div>
+          <div id="alerts-kpi-unseen" class="mt-2 text-3xl font-extrabold text-[#2b160b]">0</div>
+        </div>
+
+        <div class="rounded-[22px] border border-[#ead9cd] bg-[#fffaf6] px-5 py-4">
+          <div class="text-xs font-semibold uppercase tracking-wide text-[#a06f55]">
+            Críticas
+          </div>
+          <div id="alerts-kpi-critical" class="mt-2 text-3xl font-extrabold text-[#2b160b]">0</div>
+        </div>
+
+        <div class="rounded-[22px] border border-[#ead9cd] bg-[#fffaf6] px-5 py-4">
+          <div class="text-xs font-semibold uppercase tracking-wide text-[#a06f55]">
+            Errores
+          </div>
+          <div id="alerts-kpi-error" class="mt-2 text-3xl font-extrabold text-[#2b160b]">0</div>
+        </div>
+      </div>
+
+      <div class="rounded-[22px] border border-[#ead9cd] bg-[#fffaf6] p-4">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div>
+            <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-[#8b5e3c]">
+              Severidad
+            </label>
+            <select
+              id="alerts-severity"
+              class="w-full rounded-2xl border border-[#ddc7b8] bg-white px-4 py-3 text-sm text-[#2b160b] outline-none"
+            >
+              <option value="">Todas</option>
+              <option value="warning">Warning</option>
+              <option value="error">Error</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-[#8b5e3c]">
+              Categoría
+            </label>
+            <select
+              id="alerts-category"
+              class="w-full rounded-2xl border border-[#ddc7b8] bg-white px-4 py-3 text-sm text-[#2b160b] outline-none"
+            >
+              <option value="">Todas</option>
+              <option value="quality">Quality</option>
+              <option value="evaluation">Evaluation</option>
+              <option value="camera">Camera</option>
+              <option value="report">Report</option>
+              <option value="system">System</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-[#8b5e3c]">
+              Estado
+            </label>
+            <select
+              id="alerts-status"
+              class="w-full rounded-2xl border border-[#ddc7b8] bg-white px-4 py-3 text-sm text-[#2b160b] outline-none"
+            >
+              <option value="">Todos</option>
+              <option value="active">Activas</option>
+              <option value="inactive">Inactivas</option>
+              <option value="unseen">No vistas</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="overflow-hidden rounded-[22px] border border-[#ead9cd] bg-white">
+        <div class="max-h-[420px] overflow-auto">
+          <table class="min-w-full">
+            <thead class="sticky top-0 z-10 bg-[#f7efe8]">
+              <tr class="text-left text-xs font-semibold uppercase tracking-wide text-[#8b5e3c]">
+                <th class="px-5 py-4">Fecha</th>
+                <th class="px-5 py-4">Severidad</th>
+                <th class="px-5 py-4">Categoría</th>
+                <th class="px-5 py-4">Título</th>
+                <th class="px-5 py-4">Lote</th>
+                <th class="px-5 py-4">Estado</th>
+                <th class="px-5 py-4 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="alerts-table-body" class="divide-y divide-[#f0e1d6]">
+              <tr>
+                <td colspan="7" class="px-5 py-10 text-center text-sm text-[#8a6a58]">
+                  Cargando alertas...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
