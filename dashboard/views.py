@@ -9,7 +9,7 @@ import tempfile
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
-from .models import Batch, Provider, Evaluation, Packing
+from .models import Batch, Provider, Evaluation, Packing, ActivityLog
 from .forms import ProviderForm, BatchCreateForm
 from django.http import StreamingHttpResponse, HttpResponse
 import cv2
@@ -143,6 +143,19 @@ def settings_providers(request):
         form = ProviderForm(request.POST)
         if form.is_valid():
             p = form.save()
+
+            log_activity(
+                request=request,
+                module=ActivityLog.MODULE_SETTINGS,
+                action="provider_created",
+                description=f"Se registró el proveedor {p}",
+                level=ActivityLog.LEVEL_SUCCESS,
+                obj=p,
+                metadata={
+                    "contact": p.contact,
+                },
+            )
+
             messages.success(request, f"Proveedor '{p}' creado.")
             return redirect("dashboard:settings_providers")
 
@@ -302,6 +315,23 @@ def evaluate_image(request):
                 defects_total=defects_total,
             )
 
+        log_activity(
+            request=request,
+            module=ActivityLog.MODULE_QUALITY,
+            action="evaluation_saved",
+            description=f"Se guardó la evaluación por imagen del lote {batch.code} con grado {ev.grade}",
+            level=ActivityLog.LEVEL_SUCCESS,
+            obj=batch,
+            metadata={
+                "method": ev.method,
+                "grade": ev.grade,
+                "score": float(ev.score) if ev.score is not None else None,
+                "primary_total": ev.primary_total,
+                "secondary_total": ev.secondary_total,
+                "defects_total": ev.defects_total,
+            },
+        )
+
         return JsonResponse({
             "ok": True,
             "already_evaluated": False,
@@ -313,7 +343,21 @@ def evaluate_image(request):
             "counts": ev.counts,
         })
 
+
     except Exception as e:
+        log_activity(
+            request=request,
+            module=ActivityLog.MODULE_QUALITY,
+            action="evaluation_error",
+            description=f"Error al evaluar por imagen el lote {batch.code}",
+            level=ActivityLog.LEVEL_ERROR,
+            obj=batch,
+            metadata={
+
+                "error": str(e),
+
+            },
+        )
         return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
     finally:
@@ -331,6 +375,21 @@ def quality_home(request):
         form = BatchCreateForm(request.POST)
         if form.is_valid():
             batch = form.save()
+
+            log_activity(
+                request=request,
+                module=ActivityLog.MODULE_QUALITY,
+                action="batch_created",
+                description=f"Se creó el lote {batch.code}",
+                level=ActivityLog.LEVEL_SUCCESS,
+                obj=batch,
+                metadata={
+                    "provider": str(batch.provider),
+                    "provider_id": batch.provider_id,
+                    "weight_kg": str(batch.weight_kg),
+                },
+            )
+
             messages.success(request, f"Lote {batch.code} creado.")
             return redirect("dashboard:quality_batch_detail", batch_id=batch.id)
         messages.error(request, "No se pudo crear el lote. Revisa los campos.")
@@ -528,6 +587,19 @@ def live_start(request):
 
     sess.start()
 
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_QUALITY,
+        action="live_evaluation_started",
+        description=f"Se inició una evaluación en vivo del lote {batch.code} en {cam_id}",
+        level=ActivityLog.LEVEL_INFO,
+        obj=batch,
+        metadata={
+            "camera": cam_id,
+            "duration_s": 30,
+        },
+    )
+
     return JsonResponse({"ok": True, "state": "running", "cam_id": cam_id, "duration_s": 30})
 
 
@@ -619,6 +691,24 @@ def live_save(request):
 
     LIVE_SESSIONS.pop(cam_id, None)
     cache.delete(f"live_batch:{cam_id}")
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_QUALITY,
+        action="live_evaluation_saved",
+        description=f"Se guardó la evaluación por cámara del lote {batch.code} con grado {ev.grade}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        obj=batch,
+        metadata={
+            "camera": cam_id,
+            "method": ev.method,
+            "grade": ev.grade,
+            "score": float(ev.score) if ev.score is not None else None,
+            "primary_total": ev.primary_total,
+            "secondary_total": ev.secondary_total,
+            "defects_total": ev.defects_total,
+        },
+    )
 
     return JsonResponse({
         "ok": True,
@@ -908,7 +998,7 @@ def _pdf_response(title: str, filename: str, meta_lines: list[str], summary: dic
         y = draw_top(section_title, section_data, y)
 
     c.setFont("Helvetica-Oblique", 9)
-    c.drawString(0.8 * inch, 0.8 * inch, "Generado por CoffeeQual AI.")
+    c.drawString(0.8 * inch, 0.8 * inch, "Generado por CoffeeVision AI.")
 
     c.showPage()
     c.save()
@@ -995,7 +1085,21 @@ def reports_lote_pdf(request, batch_id: int):
     ]
 
     filename = f"reporte_lote_{batch.code}.pdf"
-    return _pdf_response("CoffeeQual AI - Reporte por Lote", filename, meta, summary)
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_REPORTS,
+        action="report_lote_pdf_generated",
+        description=f"Se generó el reporte PDF del lote {batch.code}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        obj=batch,
+        metadata={
+            "format": "pdf",
+            "scope": "batch",
+        },
+    )
+
+    return _pdf_response("CoffeeVision AI - Reporte por Lote", filename, meta, summary)
 
 
 @login_required(login_url="login")
@@ -1030,6 +1134,20 @@ def reports_lote_csv(request, batch_id: int):
         row[f"secondary_{k}"] = v
 
     header = list(row.keys())
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_REPORTS,
+        action="report_lote_csv_generated",
+        description=f"Se generó el reporte CSV del lote {batch.code}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        obj=batch,
+        metadata={
+            "format": "csv",
+            "scope": "batch",
+        },
+    )
+
     return _csv_response(f"reporte_lote_{batch.code}.csv", header, [row])
 # ===== Fin: Reports/Generar reportes por Lote =====
 
@@ -1050,6 +1168,7 @@ def reports_month_api(request):
     qs = Evaluation.objects.filter(created_at__gte=start, created_at__lt=end)
 
     summary = _summary_from_evals(qs)
+
     return JsonResponse({
         "ok": True,
         "mode": "month",
@@ -1080,7 +1199,22 @@ def reports_month_pdf(request):
 
     meta = [f"Tipo: Mes", f"Periodo: {MONTH_NAMES_ES[month-1]} {year}"]
     filename = f"reporte_mes_{year}_{month:02d}.pdf"
-    return _pdf_response("CoffeeQual AI - Reporte Mensual", filename, meta, summary)
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_REPORTS,
+        action="report_month_pdf_generated",
+        description=f"Se generó el reporte PDF del periodo {year}-{month:02d}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        metadata={
+            "format": "pdf",
+            "scope": "month",
+            "year": year,
+            "month": month,
+        },
+    )
+
+    return _pdf_response("CoffeeVision AI - Reporte Mensual", filename, meta, summary)
 
 
 @login_required(login_url="login")
@@ -1113,6 +1247,21 @@ def reports_month_csv(request):
     }]
 
     header = list(rows[0].keys())
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_REPORTS,
+        action="report_month_csv_generated",
+        description=f"Se generó el reporte CSV del periodo {year}-{month:02d}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        metadata={
+            "format": "csv",
+            "scope": "month",
+            "year": year,
+            "month": month,
+        },
+    )
+
     return _csv_response(f"reporte_mes_{year}_{month:02d}.csv", header, rows)
 # ===== Fin: Reports/Generar reportes por mes =====
 
@@ -1133,7 +1282,20 @@ def reports_global_pdf(request):
         return HttpResponse("Sin datos.", status=404)
 
     meta = ["Tipo: Global", "Periodo: Todos los lotes evaluados"]
-    return _pdf_response("CoffeeQual AI - Reporte Global", "reporte_global.pdf", meta, summary)
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_REPORTS,
+        action="report_global_pdf_generated",
+        description="Se generó el reporte global en PDF",
+        level=ActivityLog.LEVEL_SUCCESS,
+        metadata={
+            "format": "pdf",
+            "scope": "global",
+        },
+    )
+
+    return _pdf_response("CoffeeVision AI - Reporte Global", "reporte_global.pdf", meta, summary)
 
 
 @login_required(login_url="login")
@@ -1150,6 +1312,19 @@ def reports_global_csv(request):
         "quality_pct": summary["quality_pct"],
         "reject_pct": summary["reject_pct"],
     }]
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_REPORTS,
+        action="report_global_csv_generated",
+        description="Se generó el reporte global en CSV",
+        level=ActivityLog.LEVEL_SUCCESS,
+        metadata={
+            "format": "csv",
+            "scope": "global",
+        },
+    )
+
     return _csv_response("reporte_global.csv", list(rows[0].keys()), rows)
 # ===== Fin: Reports/Generar reportes Global =====
 
@@ -1183,6 +1358,21 @@ def reports_provider_pdf(request, provider_id: int):
 
     meta = ["Tipo: Proveedor", f"Proveedor: {provider_name}"]
     filename = f"reporte_proveedor_{provider.id}.pdf"
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_REPORTS,
+        action="report_provider_pdf_generated",
+        description=f"Se generó el reporte PDF del proveedor {provider_name}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        obj=provider,
+        metadata={
+            "format": "pdf",
+            "scope": "provider",
+            "provider_id": provider.id,
+        },
+    )
+
     return _pdf_response("CoffeeQual AI - Reporte por Proveedor", filename, meta, summary)
 
 
@@ -1205,6 +1395,21 @@ def reports_provider_csv(request, provider_id: int):
         "quality_pct": summary["quality_pct"],
         "reject_pct": summary["reject_pct"],
     }]
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_REPORTS,
+        action="report_provider_csv_generated",
+        description=f"Se generó el reporte CSV del proveedor {provider_name}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        obj=provider,
+        metadata={
+            "format": "csv",
+            "scope": "provider",
+            "provider_id": provider.id,
+        },
+    )
+
     return _csv_response(f"reporte_proveedor_{provider.id}.csv", list(rows[0].keys()), rows)
 # ===== Fin: Reports/Generar reportes por Proveedor =====
 
@@ -1583,10 +1788,38 @@ def packaging_update_api(request, batch_id):
     try:
         packing.save()
     except Exception as e:
+        log_activity(
+            request=request,
+            module=ActivityLog.MODULE_PACKAGING,
+            action="packing_update_error",
+            description=f"Error al actualizar el packing del lote {batch.code}",
+            level=ActivityLog.LEVEL_ERROR,
+            obj=batch,
+            metadata={
+                "error": str(e),
+                "requested_status": status_value,
+            },
+        )
         return JsonResponse({
             "success": False,
             "message": f"Error al guardar packing: {e}",
         }, status=400)
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_PACKAGING,
+        action="packing_updated",
+        description=f"Se actualizó el packing del lote {batch.code} a {packing.get_status_display()}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        obj=batch,
+        metadata={
+            "status": packing.status,
+            "status_label": packing.get_status_display(),
+            "packed_at": packing.packed_at.isoformat() if packing.packed_at else None,
+            "sent_at": packing.sent_at.isoformat() if packing.sent_at else None,
+            "notes": packing.notes or "",
+        },
+    )
 
     return JsonResponse({
         "success": True,
@@ -1602,3 +1835,138 @@ def packaging_update_api(request, batch_id):
 
 # ===== Fin: Packing/Registro y control =====
 
+# ===== Inicio: Logs/Registro de logs =====
+
+def get_client_ip(request):
+    x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR")
+
+
+def log_activity(
+    request,
+    module,
+    action,
+    description,
+    level="info",
+    obj=None,
+    metadata=None,
+    user=None,
+):
+    if user is None:
+        if hasattr(request, "user") and request.user.is_authenticated:
+            user = request.user
+        else:
+            user = None
+
+    object_type = None
+    object_id = None
+    object_label = None
+
+    if obj is not None:
+        object_type = obj.__class__.__name__.lower()
+        object_id = getattr(obj, "id", None)
+        object_label = str(obj)
+
+    ActivityLog.objects.create(
+        user=user,
+        module=module,
+        action=action,
+        description=description,
+        level=level,
+        object_type=object_type,
+        object_id=object_id,
+        object_label=object_label,
+        metadata=metadata or {},
+        ip_address=get_client_ip(request),
+    )
+
+# API vista Log
+def activity_logs_list_api(request):
+    qs = ActivityLog.objects.select_related("user").all()
+
+    date_from = request.GET.get("date_from", "").strip()
+    date_to = request.GET.get("date_to", "").strip()
+    user_id = request.GET.get("user", "").strip()
+    module = request.GET.get("module", "").strip()
+    level = request.GET.get("level", "").strip()
+
+    if date_from:
+        qs = qs.filter(created_at__date__gte=date_from)
+
+    if date_to:
+        qs = qs.filter(created_at__date__lte=date_to)
+
+    if user_id:
+        qs = qs.filter(user_id=user_id)
+
+    if module:
+        qs = qs.filter(module=module)
+
+    if level:
+        qs = qs.filter(level=level)
+
+    results = []
+    for log in qs[:300]:
+        results.append({
+            "id": log.id,
+            "created_at": log.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "user": log.user.get_username() if log.user else "Sistema",
+            "module": log.module,
+            "action": log.action,
+            "description": log.description,
+            "level": log.level,
+            "object_label": log.object_label or "",
+        })
+
+    return JsonResponse({"results": results})
+
+
+# API detalle Log
+def activity_log_detail_api(request, log_id):
+    try:
+        log = ActivityLog.objects.select_related("user").get(pk=log_id)
+    except ActivityLog.DoesNotExist:
+        return JsonResponse({"detail": "Log no encontrado."}, status=404)
+
+    return JsonResponse({
+        "id": log.id,
+        "created_at": log.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "user": log.user.get_username() if log.user else "Sistema",
+        "module": log.module,
+        "action": log.action,
+        "description": log.description,
+        "level": log.level,
+        "object_label": log.object_label,
+    })
+
+
+# API filtros
+def activity_logs_users_api(request):
+    users_data = (
+        ActivityLog.objects
+        .select_related("user")
+        .filter(user__isnull=False)
+        .values("user_id", "user__username")
+        .distinct()
+        .order_by("user__username")
+    )
+
+    results = []
+    seen = set()
+
+    for item in users_data:
+        uid = item["user_id"]
+        username = item["user__username"]
+        if uid not in seen:
+            seen.add(uid)
+            results.append({
+                "id": uid,
+                "username": username,
+            })
+
+    return JsonResponse({"results": results})
+
+
+# ===== Fin: Logs/Registro de logs =====

@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models import Q
 from decimal import Decimal
 from django.core.validators import MinValueValidator
+from django.conf import settings
 
 
 class Provider(models.Model):
@@ -218,4 +219,59 @@ class Packing(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+class ActivityLog(models.Model):
+    LEVEL_INFO = "info"
+    LEVEL_SUCCESS = "success"
+    LEVEL_WARNING = "warning"
+    LEVEL_ERROR = "error"
+    LEVEL_CHOICES = [
+        (LEVEL_INFO, "Info"),
+        (LEVEL_SUCCESS, "Success"),
+        (LEVEL_WARNING, "Warning"),
+        (LEVEL_ERROR, "Error"),
+    ]
+
+    MODULE_AUTH = "auth"
+    MODULE_QUALITY = "quality"
+    MODULE_PACKAGING = "packaging"
+    MODULE_REPORTS = "reports"
+    MODULE_SETTINGS = "settings"
+    MODULE_CHOICES = [
+        (MODULE_AUTH, "Auth"),
+        (MODULE_QUALITY, "Quality"),
+        (MODULE_PACKAGING, "Packaging"),
+        (MODULE_REPORTS, "Reports"),
+        (MODULE_SETTINGS, "Settings"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activity_logs",
+    )
+    module = models.CharField(max_length=20, choices=MODULE_CHOICES)
+    action = models.CharField(max_length=100)
+    description = models.TextField()
+    level = models.CharField(max_length=10, choices=LEVEL_CHOICES, default=LEVEL_INFO)
+
+    object_type = models.CharField(max_length=50, blank=True, null=True)
+    object_id = models.PositiveIntegerField(blank=True, null=True)
+    object_label = models.CharField(max_length=120, blank=True, null=True)
+
+    metadata = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Activity Log"
+        verbose_name_plural = "Activity Logs"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[{self.module}] {self.description}"
 

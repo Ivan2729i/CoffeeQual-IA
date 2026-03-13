@@ -1,10 +1,147 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
-</head>
-<body>
+<div
+  id="activity-module"
+  class="mt-6 grid grid-cols-1 xl:grid-cols-[1.65fr_0.85fr] gap-6 items-start"
+  data-list-url="{% url 'dashboard:activity_logs_list_api' %}"
+  data-users-url="{% url 'dashboard:activity_logs_users_api' %}"
+  data-detail-base-url="{% url 'dashboard:activity_log_detail_api' 0 %}"
+>
+  <!-- LEFT: filters + table -->
+  <section class="bg-white border border-[#eadfd3] rounded-2xl shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-[#f1e7de]">
+      <h3 class="text-lg font-semibold text-[#2b1d16]">Activity Logs</h3>
+      <p class="text-sm text-[#7b6a58] mt-1">
+        Historial de acciones registradas dentro del sistema.
+      </p>
+    </div>
 
-</body>
-</html>
+    <!-- Filters -->
+    <div class="px-6 py-5 border-b border-[#f1e7de] bg-[#fcfaf7]">
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div>
+          <label for="activity-date-from" class="block text-xs font-semibold uppercase tracking-wide text-[#6b4b2a] mb-2">
+            Desde
+          </label>
+          <input
+            id="activity-date-from"
+            type="date"
+            class="w-full rounded-xl border border-[#dccbbd] bg-white px-4 py-2.5 text-sm text-[#2b1d16] outline-none focus:border-[#c0895e] focus:ring-2 focus:ring-[#c0895e]/20"
+          >
+        </div>
+
+        <div>
+          <label for="activity-date-to" class="block text-xs font-semibold uppercase tracking-wide text-[#6b4b2a] mb-2">
+            Hasta
+          </label>
+          <input
+            id="activity-date-to"
+            type="date"
+            class="w-full rounded-xl border border-[#dccbbd] bg-white px-4 py-2.5 text-sm text-[#2b1d16] outline-none focus:border-[#c0895e] focus:ring-2 focus:ring-[#c0895e]/20"
+          >
+        </div>
+
+        <div>
+          <label for="activity-user" class="block text-xs font-semibold uppercase tracking-wide text-[#6b4b2a] mb-2">
+            Usuario
+          </label>
+          <select
+            id="activity-user"
+            class="w-full rounded-xl border border-[#dccbbd] bg-white px-4 py-2.5 text-sm text-[#2b1d16] outline-none focus:border-[#c0895e] focus:ring-2 focus:ring-[#c0895e]/20"
+          >
+            <option value="">Todos</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="activity-module-filter" class="block text-xs font-semibold uppercase tracking-wide text-[#6b4b2a] mb-2">
+            Módulo
+          </label>
+          <select
+            id="activity-module-filter"
+            class="w-full rounded-xl border border-[#dccbbd] bg-white px-4 py-2.5 text-sm text-[#2b1d16] outline-none focus:border-[#c0895e] focus:ring-2 focus:ring-[#c0895e]/20"
+          >
+            <option value="">Todos</option>
+            <option value="auth">Auth</option>
+            <option value="quality">Quality</option>
+            <option value="packaging">Packaging</option>
+            <option value="reports">Reports</option>
+            <option value="settings">Settings</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="activity-level-filter" class="block text-xs font-semibold uppercase tracking-wide text-[#6b4b2a] mb-2">
+            Nivel
+          </label>
+          <select
+            id="activity-level-filter"
+            class="w-full rounded-xl border border-[#dccbbd] bg-white px-4 py-2.5 text-sm text-[#2b1d16] outline-none focus:border-[#c0895e] focus:ring-2 focus:ring-[#c0895e]/20"
+          >
+            <option value="">Todos</option>
+            <option value="info">Info</option>
+            <option value="success">Success</option>
+            <option value="warning">Warning</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          id="activity-apply-filters"
+          type="button"
+          class="btn-shine inline-flex items-center justify-center rounded-xl bg-[#6b4b2a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#5a3f24] transition"
+        >
+          Aplicar filtros
+        </button>
+
+        <button
+          id="activity-clear-filters"
+          type="button"
+          class="btn-shine inline-flex items-center justify-center rounded-xl border border-[#dccbbd] bg-white px-4 py-2.5 text-sm font-semibold text-[#6b4b2a] hover:bg-[#f8f3ed] transition"
+        >
+          Limpiar
+        </button>
+
+        <p id="activity-feedback" class="text-sm text-[#7b6a58]"></p>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="h-[460px] overflow-y-auto overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="sticky top-0 z-10 bg-[#f8f3ed] text-[#6b4b2a]">
+          <tr>
+            <th class="px-6 py-4 text-left font-semibold">Fecha</th>
+            <th class="px-6 py-4 text-left font-semibold">Usuario</th>
+            <th class="px-6 py-4 text-left font-semibold">Módulo</th>
+            <th class="px-6 py-4 text-left font-semibold">Nivel</th>
+            <th class="px-6 py-4 text-left font-semibold">Descripción</th>
+          </tr>
+        </thead>
+        <tbody id="activity-table-body" class="divide-y divide-[#f1e7de] bg-white">
+          <tr>
+            <td colspan="5" class="px-6 py-10 text-center text-[#7b6a58]">
+              Cargando logs...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- RIGHT: detail -->
+  <aside class="bg-white border border-[#eadfd3] rounded-2xl shadow-sm overflow-hidden h-fit sticky top-8">
+    <div class="px-6 py-5 border-b border-[#f1e7de]">
+      <h3 class="text-lg font-semibold text-[#2b1d16]">Detalle del evento</h3>
+      <p class="text-sm text-[#7b6a58] mt-1">
+        Selecciona un registro de la tabla para ver su información.
+      </p>
+    </div>
+
+    <div id="activity-detail" class="p-6">
+      <div class="rounded-2xl border border-dashed border-[#dccbbd] bg-[#fcfaf7] px-5 py-8 text-center text-sm text-[#7b6a58]">
+        Aún no has seleccionado ningún log.
+      </div>
+    </div>
+  </aside>
+</div>
