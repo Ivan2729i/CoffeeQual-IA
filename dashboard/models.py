@@ -275,3 +275,85 @@ class ActivityLog(models.Model):
     def __str__(self):
         return f"[{self.module}] {self.description}"
 
+
+class Alert(models.Model):
+    SEVERITY_WARNING = "warning"
+    SEVERITY_ERROR = "error"
+    SEVERITY_CRITICAL = "critical"
+    SEVERITY_CHOICES = [
+        (SEVERITY_WARNING, "Warning"),
+        (SEVERITY_ERROR, "Error"),
+        (SEVERITY_CRITICAL, "Critical"),
+    ]
+
+    CATEGORY_QUALITY = "quality"
+    CATEGORY_EVALUATION = "evaluation"
+    CATEGORY_CAMERA = "camera"
+    CATEGORY_REPORT = "report"
+    CATEGORY_SYSTEM = "system"
+    CATEGORY_CHOICES = [
+        (CATEGORY_QUALITY, "Quality"),
+        (CATEGORY_EVALUATION, "Evaluation"),
+        (CATEGORY_CAMERA, "Camera"),
+        (CATEGORY_REPORT, "Report"),
+        (CATEGORY_SYSTEM, "System"),
+    ]
+
+    title = models.CharField(max_length=150)
+    message = models.TextField()
+
+    severity = models.CharField(
+        max_length=10,
+        choices=SEVERITY_CHOICES,
+        default=SEVERITY_WARNING,
+        db_index=True,
+    )
+
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        default=CATEGORY_SYSTEM,
+        db_index=True,
+    )
+
+    batch = models.ForeignKey(
+        Batch,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="alerts",
+    )
+
+    evaluation = models.ForeignKey(
+        Evaluation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="alerts",
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_alerts",
+    )
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    is_seen = models.BooleanField(default=False, db_index=True)
+
+    metadata = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    seen_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Alert"
+        verbose_name_plural = "Alerts"
+        ordering = ["is_seen", "-created_at"]
+
+    def __str__(self):
+        return f"[{self.severity.upper()}] {self.title}"
+
+

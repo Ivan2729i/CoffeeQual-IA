@@ -9,7 +9,7 @@ import tempfile
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.db import transaction
-from .models import Batch, Provider, Evaluation, Packing, ActivityLog
+from .models import Batch, Provider, Evaluation, Packing, ActivityLog, Alert
 from .forms import ProviderForm, BatchCreateForm
 from django.http import StreamingHttpResponse, HttpResponse
 import cv2
@@ -315,6 +315,9 @@ def evaluate_image(request):
                 defects_total=defects_total,
             )
 
+        if ev.primary_total > 15:
+            create_primary_defects_alert(ev, created_by=request.user)
+
         log_activity(
             request=request,
             module=ActivityLog.MODULE_QUALITY,
@@ -345,6 +348,17 @@ def evaluate_image(request):
 
 
     except Exception as e:
+        create_evaluation_error_alert(
+            batch=batch,
+            error_message=f"Ocurrió un error al evaluar por imagen el lote {batch.code}: {str(e)}",
+            created_by=request.user,
+            metadata={
+                "source": "evaluate_image",
+                "batch_code": batch.code,
+                "error": str(e),
+            },
+        )
+
         log_activity(
             request=request,
             module=ActivityLog.MODULE_QUALITY,
@@ -558,6 +572,15 @@ def live_start(request):
 
     src = CAMERA_SOURCES.get(cam_id)
     if not src:
+        create_camera_error_alert(
+            message=f"La cámara {cam_id} no está configurada en el sistema.",
+            batch=batch,
+            created_by=request.user,
+            metadata={
+                "camera_id": cam_id,
+                "source": "live_start",
+            },
+        )
         return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=400)
 
     # GoPro deshabilitada por ahora
@@ -585,7 +608,33 @@ def live_start(request):
 
     LIVE_SESSIONS[cam_id] = sess
 
-    sess.start()
+    try:
+        sess.start()
+    except Exception as e:
+        create_camera_error_alert(
+            message=f"No se pudo iniciar la sesión de evaluación en vivo para la cámara {cam_id}: {str(e)}",
+            batch=batch,
+            created_by=request.user,
+            metadata={
+                "camera_id": cam_id,
+                "source": "live_start",
+                "error": str(e),
+            },
+        )
+
+        log_activity(
+            request=request,
+            module=ActivityLog.MODULE_QUALITY,
+            action="live_evaluation_start_error",
+            description=f"Error al iniciar evaluación en vivo del lote {batch.code} en {cam_id}",
+            level=ActivityLog.LEVEL_ERROR,
+            obj=batch,
+            metadata={
+                "camera": cam_id,
+                "error": str(e),
+            },
+        )
+        return JsonResponse({"ok": False, "error": str(e)}, status=500)
 
     log_activity(
         request=request,
@@ -682,6 +731,9 @@ def live_save(request):
             secondary_total=secondary_total,
             defects_total=defects_total,
         )
+
+    if ev.primary_total > 15:
+        create_primary_defects_alert(ev, created_by=request.user)
 
     # detener y limpiar sesión para que no se "pegue" a otros lotes
     try:
@@ -1067,6 +1119,17 @@ def reports_lote_api(request, batch_id: int):
 def reports_lote_pdf(request, batch_id: int):
     batch = get_object_or_404(Batch.objects.select_related("provider"), pk=batch_id)
     if not hasattr(batch, "evaluation"):
+        create_report_error_alert(
+            batch=batch,
+            message=f"No se pudo generar el reporte PDF del lote {batch.code} porque no tiene evaluación.",
+            created_by=request.user,
+            metadata={
+                "format": "pdf",
+                "scope": "batch",
+                "batch_code": batch.code,
+                "reason": "sin_evaluacion",
+            },
+        )
         return HttpResponse("Este lote no tiene evaluación.", status=404)
 
     ev = batch.evaluation
@@ -1106,6 +1169,17 @@ def reports_lote_pdf(request, batch_id: int):
 def reports_lote_csv(request, batch_id: int):
     batch = get_object_or_404(Batch.objects.select_related("provider"), pk=batch_id)
     if not hasattr(batch, "evaluation"):
+        create_report_error_alert(
+            batch=batch,
+            message=f"No se pudo generar el reporte CSV del lote {batch.code} porque no tiene evaluación.",
+            created_by=request.user,
+            metadata={
+                "format": "csv",
+                "scope": "batch",
+                "batch_code": batch.code,
+                "reason": "sin_evaluacion",
+            },
+        )
         return HttpResponse("Este lote no tiene evaluación.", status=404)
 
     ev = batch.evaluation
@@ -1195,6 +1269,17 @@ def reports_month_pdf(request):
     summary = _summary_from_evals(qs)
 
     if summary["total_lots"] <= 0:
+        create_report_error_alert(
+            message=f"No se pudo generar el reporte PDF del periodo {year}-{month:02d} porque no existen datos.",
+            created_by=request.user,
+            metadata={
+                "format": "pdf",
+                "scope": "month",
+                "year": year,
+                "month": month,
+                "reason": "sin_datos",
+            },
+        )
         return HttpResponse("Sin datos para ese periodo.", status=404)
 
     meta = [f"Tipo: Mes", f"Periodo: {MONTH_NAMES_ES[month-1]} {year}"]
@@ -1233,6 +1318,17 @@ def reports_month_csv(request):
     qs = Evaluation.objects.filter(created_at__gte=start, created_at__lt=end)
     summary = _summary_from_evals(qs)
     if summary["total_lots"] <= 0:
+        create_report_error_alert(
+            message=f"No se pudo generar el reporte CSV del periodo {year}-{month:02d} porque no existen datos.",
+            created_by=request.user,
+            metadata={
+                "format": "csv",
+                "scope": "month",
+                "year": year,
+                "month": month,
+                "reason": "sin_datos",
+            },
+        )
         return HttpResponse("Sin datos para ese periodo.", status=404)
 
     # 1 fila resumen + filas por lote
@@ -1279,6 +1375,15 @@ def reports_global_pdf(request):
     qs = Evaluation.objects.all()
     summary = _summary_from_evals(qs)
     if summary["total_lots"] <= 0:
+        create_report_error_alert(
+            message="No se pudo generar el reporte global en PDF porque no existen evaluaciones registradas.",
+            created_by=request.user,
+            metadata={
+                "format": "pdf",
+                "scope": "global",
+                "reason": "sin_datos",
+            },
+        )
         return HttpResponse("Sin datos.", status=404)
 
     meta = ["Tipo: Global", "Periodo: Todos los lotes evaluados"]
@@ -1303,6 +1408,15 @@ def reports_global_csv(request):
     qs = Evaluation.objects.all()
     summary = _summary_from_evals(qs)
     if summary["total_lots"] <= 0:
+        create_report_error_alert(
+            message="No se pudo generar el reporte global en CSV porque no existen evaluaciones registradas.",
+            created_by=request.user,
+            metadata={
+                "format": "csv",
+                "scope": "global",
+                "reason": "sin_datos",
+            },
+        )
         return HttpResponse("Sin datos.", status=404)
 
     rows = [{
@@ -1354,6 +1468,16 @@ def reports_provider_pdf(request, provider_id: int):
     qs = Evaluation.objects.filter(batch__provider=provider)
     summary = _summary_from_evals(qs)
     if summary["total_lots"] <= 0:
+        create_report_error_alert(
+            message=f"No se pudo generar el reporte PDF del proveedor {provider_name} porque no existen evaluaciones registradas.",
+            created_by=request.user,
+            metadata={
+                "format": "pdf",
+                "scope": "provider",
+                "provider_id": provider.id,
+                "reason": "sin_datos",
+            },
+        )
         return HttpResponse("Sin datos para este proveedor.", status=404)
 
     meta = ["Tipo: Proveedor", f"Proveedor: {provider_name}"]
@@ -1373,7 +1497,7 @@ def reports_provider_pdf(request, provider_id: int):
         },
     )
 
-    return _pdf_response("CoffeeQual AI - Reporte por Proveedor", filename, meta, summary)
+    return _pdf_response("CoffeeVision AI - Reporte por Proveedor", filename, meta, summary)
 
 
 @login_required(login_url="login")
@@ -1384,6 +1508,16 @@ def reports_provider_csv(request, provider_id: int):
     qs = Evaluation.objects.filter(batch__provider=provider)
     summary = _summary_from_evals(qs)
     if summary["total_lots"] <= 0:
+        create_report_error_alert(
+            message=f"No se pudo generar el reporte CSV del proveedor {provider_name} porque no existen evaluaciones registradas.",
+            created_by=request.user,
+            metadata={
+                "format": "csv",
+                "scope": "provider",
+                "provider_id": provider.id,
+                "reason": "sin_datos",
+            },
+        )
         return HttpResponse("Sin datos para este proveedor.", status=404)
 
     rows = [{
@@ -1417,7 +1551,6 @@ def reports_provider_csv(request, provider_id: int):
 
 
 # ===== Inicio: Batch/Historial y filtros =====
-
 def _to_int(val, default=None):
     try:
         return int(val)
@@ -1836,7 +1969,6 @@ def packaging_update_api(request, batch_id):
 # ===== Fin: Packing/Registro y control =====
 
 # ===== Inicio: Logs/Registro de logs =====
-
 def get_client_ip(request):
     x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
     if x_forwarded_for:
@@ -1970,3 +2102,266 @@ def activity_logs_users_api(request):
 
 
 # ===== Fin: Logs/Registro de logs =====
+
+
+# ===== Inicio: Alerts/Registro de alerts =====
+# Helpers
+def create_alert(
+    *,
+    title,
+    message,
+    severity=Alert.SEVERITY_WARNING,
+    category=Alert.CATEGORY_SYSTEM,
+    batch=None,
+    evaluation=None,
+    created_by=None,
+    metadata=None,
+):
+    return Alert.objects.create(
+        title=title,
+        message=message,
+        severity=severity,
+        category=category,
+        batch=batch,
+        evaluation=evaluation,
+        created_by=created_by,
+        metadata=metadata or {},
+    )
+
+
+def create_primary_defects_alert(evaluation, created_by=None):
+    batch = evaluation.batch
+    primary_total = evaluation.primary_total or 0
+
+    if primary_total <= 15:
+        return None
+
+    already_exists = Alert.objects.filter(
+        category=Alert.CATEGORY_QUALITY,
+        batch=batch,
+        evaluation=evaluation,
+        is_active=True,
+        is_seen=False,
+    ).exists()
+
+    if already_exists:
+        return None
+
+    return create_alert(
+        title="Exceso de defectos primarios detectado",
+        message=f"El lote {batch.code} superó el límite permitido con {primary_total} defectos primarios.",
+        severity=Alert.SEVERITY_CRITICAL,
+        category=Alert.CATEGORY_QUALITY,
+        batch=batch,
+        evaluation=evaluation,
+        created_by=created_by,
+        metadata={
+            "batch_code": batch.code,
+            "primary_total": primary_total,
+        },
+    )
+
+
+def create_evaluation_error_alert(*, batch=None, error_message="", created_by=None, metadata=None):
+    return create_alert(
+        title="Error en evaluación",
+        message=error_message or "Ocurrió un error durante el proceso de evaluación del lote.",
+        severity=Alert.SEVERITY_ERROR,
+        category=Alert.CATEGORY_EVALUATION,
+        batch=batch,
+        created_by=created_by,
+        metadata=metadata or {},
+    )
+
+
+def create_camera_error_alert(*, message, batch=None, created_by=None, metadata=None):
+    return create_alert(
+        title="Error de conexión con la cámara",
+        message=message,
+        severity=Alert.SEVERITY_CRITICAL,
+        category=Alert.CATEGORY_CAMERA,
+        batch=batch,
+        created_by=created_by,
+        metadata=metadata or {},
+    )
+
+
+def create_report_error_alert(*, batch=None, message="", created_by=None, metadata=None):
+    return create_alert(
+        title="Error al generar reporte",
+        message=message or "No se pudo generar el reporte solicitado.",
+        severity=Alert.SEVERITY_ERROR,
+        category=Alert.CATEGORY_REPORT,
+        batch=batch,
+        created_by=created_by,
+        metadata=metadata or {},
+    )
+
+
+# APIS
+@login_required(login_url="login")
+@require_GET
+def alerts_summary_api(request):
+    qs = Alert.objects.filter(is_active=True)
+
+    return JsonResponse({
+        "ok": True,
+        "summary": {
+            "total": qs.count(),
+            "unseen": qs.filter(is_seen=False).count(),
+            "warning": qs.filter(severity=Alert.SEVERITY_WARNING).count(),
+            "error": qs.filter(severity=Alert.SEVERITY_ERROR).count(),
+            "critical": qs.filter(severity=Alert.SEVERITY_CRITICAL).count(),
+        }
+    })
+
+
+@login_required(login_url="login")
+@require_GET
+def alerts_list_api(request):
+    qs = (
+        Alert.objects
+        .select_related("batch", "evaluation", "created_by")
+        .order_by("is_seen", "-created_at")
+    )
+
+    severity = (request.GET.get("severity") or "").strip()
+    category = (request.GET.get("category") or "").strip()
+    status = (request.GET.get("status") or "").strip()
+    search = (request.GET.get("search") or "").strip()
+
+    if severity:
+        qs = qs.filter(severity=severity)
+
+    if category:
+        qs = qs.filter(category=category)
+
+    if status == "active":
+        qs = qs.filter(is_active=True)
+    elif status == "inactive":
+        qs = qs.filter(is_active=False)
+    elif status == "unseen":
+        qs = qs.filter(is_seen=False)
+
+    if search:
+        qs = qs.filter(
+            Q(title__icontains=search) |
+            Q(message__icontains=search) |
+            Q(batch__code__icontains=search)
+        )
+
+    results = []
+    for alert in qs[:100]:
+        results.append({
+            "id": alert.id,
+            "title": alert.title,
+            "message": alert.message,
+            "severity": alert.severity,
+            "category": alert.category,
+            "is_active": alert.is_active,
+            "is_seen": alert.is_seen,
+            "created_at": alert.created_at.isoformat(),
+            "seen_at": alert.seen_at.isoformat() if alert.seen_at else None,
+            "batch_id": alert.batch_id,
+            "batch_code": alert.batch.code if alert.batch else None,
+            "evaluation_id": alert.evaluation_id,
+            "created_by": alert.created_by.get_username() if alert.created_by else None,
+            "metadata": alert.metadata or {},
+        })
+
+    return JsonResponse({
+        "ok": True,
+        "results": results,
+    })
+
+
+@login_required(login_url="login")
+@require_GET
+def alerts_active_api(request):
+    qs = (
+        Alert.objects
+        .filter(is_active=True)
+        .select_related("batch", "evaluation")
+        .order_by("is_seen", "-created_at")
+    )
+
+    only_unseen = request.GET.get("only_unseen")
+    limit_raw = request.GET.get("limit", "10")
+
+    try:
+        limit = max(1, min(int(limit_raw), 50))
+    except (TypeError, ValueError):
+        limit = 10
+
+    if only_unseen in {"1", "true", "True"}:
+        qs = qs.filter(is_seen=False)
+
+    results = []
+    for alert in qs[:limit]:
+        results.append({
+            "id": alert.id,
+            "title": alert.title,
+            "message": alert.message,
+            "severity": alert.severity,
+            "category": alert.category,
+            "is_active": alert.is_active,
+            "is_seen": alert.is_seen,
+            "created_at": alert.created_at.isoformat(),
+            "seen_at": alert.seen_at.isoformat() if alert.seen_at else None,
+            "batch_id": alert.batch_id,
+            "batch_code": alert.batch.code if alert.batch else None,
+            "evaluation_id": alert.evaluation_id,
+            "metadata": alert.metadata or {},
+        })
+
+    return JsonResponse({
+        "ok": True,
+        "results": results,
+    })
+
+
+@login_required(login_url="login")
+@require_POST
+def alert_mark_seen_api(request, alert_id):
+    try:
+        alert = Alert.objects.get(pk=alert_id, is_active=True)
+    except Alert.DoesNotExist:
+        return JsonResponse({
+            "ok": False,
+            "message": "Alerta no encontrada.",
+        }, status=404)
+
+    if not alert.is_seen:
+        alert.is_seen = True
+        alert.seen_at = timezone.now()
+        alert.save(update_fields=["is_seen", "seen_at"])
+
+    return JsonResponse({
+        "ok": True,
+        "message": "Alerta marcada como vista.",
+    })
+
+
+@login_required(login_url="login")
+@require_POST
+def alert_deactivate_api(request, alert_id):
+    try:
+        alert = Alert.objects.get(pk=alert_id)
+    except Alert.DoesNotExist:
+        return JsonResponse({
+            "ok": False,
+            "message": "Alerta no encontrada.",
+        }, status=404)
+
+    if alert.is_active:
+        alert.is_active = False
+        alert.save(update_fields=["is_active"])
+
+    return JsonResponse({
+        "ok": True,
+        "message": "Alerta desactivada.",
+    })
+
+
+# ===== Fin: Alerts/Registro de alerts =====
+
