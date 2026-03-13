@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models import Q
 from decimal import Decimal
 from django.core.validators import MinValueValidator
+from django.conf import settings
 
 
 class Provider(models.Model):
@@ -74,6 +75,12 @@ class Batch(models.Model):
     @property
     def is_evaluated(self) -> bool:
         return hasattr(self, "evaluation")
+
+    @property
+    def packing_status(self) -> str | None:
+        if hasattr(self, "packing"):
+            return self.packing.status
+        return None
 
 
 class Evaluation(models.Model):
@@ -148,3 +155,123 @@ class Evaluation(models.Model):
         super().save(*args, **kwargs)
 
         Batch.objects.filter(pk=self.batch_id).update(status=Batch.STATUS_EVALUATED)
+
+        # Crear packing automático al evaluar el lote
+        Packing.objects.get_or_create(batch=self.batch)
+
+
+class Packing(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_PACKED = "packed"
+    STATUS_SENT = "sent"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pendiente"),
+        (STATUS_PACKED, "Empacado"),
+        (STATUS_SENT, "Enviado"),
+    ]
+
+    batch = models.OneToOneField(
+        Batch,
+        on_delete=models.CASCADE,
+        related_name="packing",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    packed_at = models.DateField(null=True, blank=True)
+    sent_at = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Packing"
+        verbose_name_plural = "Packing"
+        ordering = ["-updated_at"]
+
+    def __str__(self) -> str:
+        return f"Packing {self.batch.code}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if not hasattr(self.batch, "evaluation"):
+            raise ValidationError("Solo se puede crear packing para lotes evaluados.")
+
+        if self.status == self.STATUS_PENDING:
+            self.packed_at = None
+            self.sent_at = None
+
+        if self.status == self.STATUS_PACKED:
+            if not self.packed_at:
+                raise ValidationError("La fecha de empaque es obligatoria cuando el estado es Empacado.")
+            self.sent_at = None
+
+        if self.status == self.STATUS_SENT:
+            if not self.packed_at:
+                raise ValidationError("Para marcar como Enviado, primero debe existir fecha de empaque.")
+            if not self.sent_at:
+                raise ValidationError("La fecha de envío es obligatoria cuando el estado es Enviado.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class ActivityLog(models.Model):
+    LEVEL_INFO = "info"
+    LEVEL_SUCCESS = "success"
+    LEVEL_WARNING = "warning"
+    LEVEL_ERROR = "error"
+    LEVEL_CHOICES = [
+        (LEVEL_INFO, "Info"),
+        (LEVEL_SUCCESS, "Success"),
+        (LEVEL_WARNING, "Warning"),
+        (LEVEL_ERROR, "Error"),
+    ]
+
+    MODULE_AUTH = "auth"
+    MODULE_QUALITY = "quality"
+    MODULE_PACKAGING = "packaging"
+    MODULE_REPORTS = "reports"
+    MODULE_SETTINGS = "settings"
+    MODULE_CHOICES = [
+        (MODULE_AUTH, "Auth"),
+        (MODULE_QUALITY, "Quality"),
+        (MODULE_PACKAGING, "Packaging"),
+        (MODULE_REPORTS, "Reports"),
+        (MODULE_SETTINGS, "Settings"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activity_logs",
+    )
+    module = models.CharField(max_length=20, choices=MODULE_CHOICES)
+    action = models.CharField(max_length=100)
+    description = models.TextField()
+    level = models.CharField(max_length=10, choices=LEVEL_CHOICES, default=LEVEL_INFO)
+
+    object_type = models.CharField(max_length=50, blank=True, null=True)
+    object_id = models.PositiveIntegerField(blank=True, null=True)
+    object_label = models.CharField(max_length=120, blank=True, null=True)
+
+    metadata = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Activity Log"
+        verbose_name_plural = "Activity Logs"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[{self.module}] {self.description}"
+
