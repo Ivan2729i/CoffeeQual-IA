@@ -1,22 +1,24 @@
 import cv2
+import os
 
-# URL HLS, usa local si estás en la misma VM
-hls_url = "http://itverland.com:8080/hls/stream.m3u8"
+url = os.getenv("CAM1_RTSP_URL")
 
-cap = cv2.VideoCapture(hls_url)
+cap = cv2.VideoCapture(url)
 
 if not cap.isOpened():
-    raise RuntimeError("No se pudo abrir el stream HLS")
+    print("No se pudo abrir la camara")
+    exit()
 
 while True:
     ret, frame = cap.read()
     if not ret:
-        print("No hay más frames, esperando...")
-        cv2.waitKey(1000)  # espera 1s y vuelve a intentar
-        continue
+        print("No se pudo leer el frame")
+        break
 
-    cv2.imshow("HLS Stream", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    frame_small = cv2.resize(frame, (640, 360))
+    cv2.imshow("Camara", frame_small)
+
+    if cv2.waitKey(1) & 0xFF == 27:  # ESC
         break
 
 cap.release()
