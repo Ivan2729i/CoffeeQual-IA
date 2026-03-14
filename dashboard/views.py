@@ -63,6 +63,14 @@ def quality_view(request):
 
 
 @login_required(login_url="login")
+def aroma_view(request):
+    return render(request, TEMPLATE, {
+        "page_title": "Aroma Analysis",
+        "active": "Aroma",
+    })
+
+
+@login_required(login_url="login")
 def batch_metrics_view(request):
     return render(request, TEMPLATE, {
         "page_title": "Batch Metrics",
