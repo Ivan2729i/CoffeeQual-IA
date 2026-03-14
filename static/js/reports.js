@@ -22,22 +22,29 @@
   const btnCsv = document.getElementById("btnCsv");
 
   // ----- URLS DESDE DATASET -----
-  const apiLoteBase = root.dataset.apiLote;                 // .../api/reports/lote/0/
-  const apiProviderBase = root.dataset.apiProvider;         // .../api/reports/provider/0/
-  const apiMonth = root.dataset.apiMonth;                   // .../api/reports/month/
-  const apiGlobal = root.dataset.apiGlobal;                 // .../api/reports/global/
+  const apiLoteBase = root.dataset.apiLote;
+  const apiProviderBase = root.dataset.apiProvider;
+  const apiMonth = root.dataset.apiMonth;
+  const apiGlobal = root.dataset.apiGlobal;
 
   const pdfMonth = root.dataset.pdfMonth;
   const csvMonth = root.dataset.csvMonth;
   const pdfGlobal = root.dataset.pdfGlobal;
   const csvGlobal = root.dataset.csvGlobal;
 
-  const pdfLoteBase = root.dataset.pdfLoteBase;             // .../reports/lote/999999/pdf/
-  const csvLoteBase = root.dataset.csvLoteBase;             // .../reports/lote/999999/csv/
-  const pdfProviderBase = root.dataset.pdfProviderBase;     // .../reports/provider/999999/pdf/
-  const csvProviderBase = root.dataset.csvProviderBase;     // .../reports/provider/999999/csv/
+  const pdfLoteBase = root.dataset.pdfLoteBase;
+  const csvLoteBase = root.dataset.csvLoteBase;
+  const pdfProviderBase = root.dataset.pdfProviderBase;
+  const csvProviderBase = root.dataset.csvProviderBase;
 
   const PLACEHOLDER = "999999";
+
+  const state = {
+    pdfUrl: "#",
+    csvUrl: "#",
+    enabled: false,
+    downloading: false,
+  };
 
   // ----- HELPERS -----
   const isValidId = (id) => {
@@ -49,17 +56,14 @@
     if (!base) return "#";
     const sid = String(id).trim();
 
-    // Caso recomendado: base trae 999999
     if (base.includes(PLACEHOLDER)) {
       return base.replaceAll(PLACEHOLDER, sid);
     }
 
-    // Caso alterno: base trae /0/
     if (base.includes("/0/")) {
       return base.replaceAll("/0/", `/${sid}/`);
     }
 
-    // Último intento
     return base.replace(/\/(\d+)\//, `/${sid}/`);
   };
 
@@ -75,9 +79,19 @@
     return null;
   };
 
+  function showToast(message, type = "info") {
+    if (window.fsToast) {
+      window.fsToast(message, type);
+    }
+  }
+
   function setButtons(enabled, pdfHref = "#", csvHref = "#") {
-    if (btnPdf) btnPdf.href = pdfHref;
-    if (btnCsv) btnCsv.href = csvHref;
+    state.enabled = !!enabled;
+    state.pdfUrl = pdfHref || "#";
+    state.csvUrl = csvHref || "#";
+
+    if (btnPdf) btnPdf.href = state.pdfUrl;
+    if (btnCsv) btnCsv.href = state.csvUrl;
 
     btnPdf?.classList.toggle("pointer-events-none", !enabled);
     btnPdf?.classList.toggle("opacity-50", !enabled);
@@ -194,6 +208,82 @@
     `;
   }
 
+  function getFilenameFromResponse(res, fallbackName) {
+    const contentDisposition = res.headers.get("Content-Disposition") || "";
+    const matchUtf8 = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (matchUtf8?.[1]) {
+      return decodeURIComponent(matchUtf8[1]);
+    }
+
+    const matchPlain = contentDisposition.match(/filename="([^"]+)"/i);
+    if (matchPlain?.[1]) {
+      return matchPlain[1];
+    }
+
+    return fallbackName;
+  }
+
+  function triggerBrowserDownload(blob, filename) {
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.setTimeout(() => {
+      window.URL.revokeObjectURL(blobUrl);
+    }, 1000);
+  }
+
+  async function downloadReport(url, formatLabel = "reporte") {
+    if (!url || url === "#" || !state.enabled) {
+      showToast("Primero genera una vista previa válida del reporte.", "warning");
+      return;
+    }
+
+    if (state.downloading) {
+      showToast("Ya hay una descarga en proceso.", "info");
+      return;
+    }
+
+    state.downloading = true;
+
+    try {
+
+      const res = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest"
+        }
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `No se pudo descargar el reporte ${formatLabel.toUpperCase()}.`);
+      }
+
+      const blob = await res.blob();
+
+      if (!blob || blob.size === 0) {
+        throw new Error(`El archivo ${formatLabel.toUpperCase()} llegó vacío.`);
+      }
+
+      const fallbackName = formatLabel === "pdf" ? "reporte.pdf" : "reporte.csv";
+      const filename = getFilenameFromResponse(res, fallbackName);
+
+      triggerBrowserDownload(blob, filename);
+      showToast(`Reporte ${formatLabel.toUpperCase()} descargado correctamente.`, "success");
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || `Error al descargar el reporte ${formatLabel.toUpperCase()}.`, "error");
+    } finally {
+      state.downloading = false;
+    }
+  }
+
   // ----- LOADERS -----
   async function loadLote(id) {
     if (!isValidId(id)) {
@@ -245,7 +335,8 @@
     `;
 
     status.textContent = "Listo";
-    setButtons(true,
+    setButtons(
+      true,
       replaceId(pdfLoteBase, id),
       replaceId(csvLoteBase, id)
     );
@@ -267,7 +358,8 @@
     renderSummaryCard(`Reporte mensual: ${data.period?.label ?? ""}`, data.summary);
     status.textContent = "Listo";
 
-    setButtons(true,
+    setButtons(
+      true,
       `${pdfMonth}?year=${year}&month=${month}`,
       `${csvMonth}?year=${year}&month=${month}`
     );
@@ -293,7 +385,8 @@
     renderSummaryCard(`Reporte por proveedor: ${data.provider?.name ?? "—"}`, data.summary);
     status.textContent = "Listo";
 
-    setButtons(true,
+    setButtons(
+      true,
       replaceId(pdfProviderBase, id),
       replaceId(csvProviderBase, id)
     );
@@ -344,10 +437,22 @@
     }
   }
 
+  function bindDownloadButtons() {
+    btnPdf?.addEventListener("click", async (e) => {
+      e.preventDefault();
+      await downloadReport(state.pdfUrl, "pdf");
+    });
+
+    btnCsv?.addEventListener("click", async (e) => {
+      e.preventDefault();
+      await downloadReport(state.csvUrl, "csv");
+    });
+  }
+
   // ----- INIT + EVENTS -----
   setMode(typeSel.value);
+  bindDownloadButtons();
 
-  // Selección inicial inteligente
   if (typeSel.value === "lote" && batchSel && !batchSel.value) $safeFirst(batchSel);
   if (typeSel.value === "provider" && providerSel && !providerSel.value) $safeFirst(providerSel);
 

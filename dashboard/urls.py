@@ -49,5 +49,8 @@ urlpatterns = [
     path("api/alerts/<int:alert_id>/deactivate/", views.alert_deactivate_api, name="alert_deactivate_api"),
     path("settings/", views.settings_view, name="settings"),
     path("settings/providers/", views.settings_providers, name="settings_providers"),
+    path("settings/providers/create/", views.providers_create, name="providers_create"),
+    path("settings/providers/<int:pk>/update/", views.providers_update, name="providers_update"),
+    path("settings/providers/<int:pk>/delete/", views.providers_delete, name="providers_delete"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
 ]

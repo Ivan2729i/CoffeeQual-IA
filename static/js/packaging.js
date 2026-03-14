@@ -363,11 +363,11 @@ document.addEventListener("DOMContentLoaded", () => {
       let toastMsg = successMsg;
 
       if (savedStatus === "packed") {
-        toastMsg = `Se empaquetó correctamente el lote ${batchCodeText}.`;
+        toastMsg = `Se empaquetó correctamente el lote.`;
       } else if (savedStatus === "sent") {
-        toastMsg = `Se envió correctamente el lote ${batchCodeText}.`;
+        toastMsg = `Se envió correctamente el lote.`;
       } else if (savedStatus === "pending") {
-        toastMsg = `El lote ${batchCodeText} volvió a estado pendiente.`;
+        toastMsg = `El lote volvió a estado pendiente.`;
       }
 
       if (window.fsToast) window.fsToast(toastMsg, "success");

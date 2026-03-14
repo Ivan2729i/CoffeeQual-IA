@@ -116,4 +116,79 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 DEFAULT_FROM_EMAIL = "no-reply@coffeequal.local"
 
 
+# Cameras
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_camera_sources():
+    cameras = {}
+    # =========================
+    # CAM1
+    # =========================
+    cam1_sources = []
+
+    cam1_rtsp = os.getenv("CAM1_RTSP_URL", "").strip()
+    cam1_fallback_type = os.getenv("CAM1_FALLBACK_TYPE", "").strip().lower()
+    cam1_fallback_url = os.getenv("CAM1_FALLBACK_URL", "").strip()
+    cam1_fallback_index = _env_int("CAM1_FALLBACK_INDEX", 1)
+
+    if cam1_rtsp:
+        cam1_sources.append({
+            "name": "cam1_ip",
+            "type": "rtsp",
+            "url": cam1_rtsp,
+        })
+
+    if cam1_fallback_type == "rtsp" and cam1_fallback_url:
+        cam1_sources.append({
+            "name": "cam1_fallback",
+            "type": "rtsp",
+            "url": cam1_fallback_url,
+        })
+    elif cam1_fallback_type == "device":
+        cam1_sources.append({
+            "name": "cam1_fallback",
+            "type": "device",
+            "index": cam1_fallback_index,
+        })
+
+    if cam1_sources:
+        cameras["cam1"] = cam1_sources
+
+    # =========================
+    # CAM2
+    # =========================
+    cam2_sources = []
+
+    cam2_type = os.getenv("CAM2_TYPE", "").strip().lower()
+    cam2_index = _env_int("CAM2_INDEX", 0)
+    cam2_rtsp = os.getenv("CAM2_RTSP_URL", "").strip()
+
+    if cam2_type == "rtsp" and cam2_rtsp:
+        cam2_sources.append({
+            "name": "cam2_rtsp",
+            "type": "rtsp",
+            "url": cam2_rtsp,
+        })
+    elif cam2_type == "device":
+        cam2_sources.append({
+            "name": "cam2_device",
+            "type": "device",
+            "index": cam2_index,
+        })
+
+    if cam2_sources:
+        cameras["cam2"] = cam2_sources
+
+    return cameras
+
+CAMERA_SOURCES = _build_camera_sources()
+
+
+
+
 # http://127.0.0.1:8000/

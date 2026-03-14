@@ -13,12 +13,11 @@ from .models import Batch, Provider, Evaluation, Packing, ActivityLog, Alert
 from .forms import ProviderForm, BatchCreateForm
 from django.http import StreamingHttpResponse, HttpResponse
 import cv2
-from django.http import StreamingHttpResponse
 from django.core.cache import cache
 import time
 from inference.live_session import LiveEvalSession
 from datetime import date
-from django.db.models import Count, Sum, IntegerField, Case, When
+from django.db.models import Count, Sum, IntegerField, Case, When, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 import io
@@ -28,9 +27,10 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 from decimal import Decimal
-from django.db.models import Sum, Q
 from .camera_hub import get_camera_worker
 import json
+from django.conf import settings
+
 
 
 # ========= Inicio: Vistas SideBar =============
@@ -135,41 +135,156 @@ def settings_view(request):
 
 
 # ========= Inicio: Settings/Providers =============
-
+# Render
 @login_required(login_url="login")
-@require_http_methods(["GET", "POST"])
+@require_http_methods(["GET"])
 def settings_providers(request):
-    if request.method == "POST":
-        form = ProviderForm(request.POST)
-        if form.is_valid():
-            p = form.save()
-
-            log_activity(
-                request=request,
-                module=ActivityLog.MODULE_SETTINGS,
-                action="provider_created",
-                description=f"Se registró el proveedor {p}",
-                level=ActivityLog.LEVEL_SUCCESS,
-                obj=p,
-                metadata={
-                    "contact": p.contact,
-                },
-            )
-
-            messages.success(request, f"Proveedor '{p}' creado.")
-            return redirect("dashboard:settings_providers")
-
-        messages.error(request, "No se pudo guardar. Revisa los campos marcados.")
-    else:
-        form = ProviderForm()
-
+    form = ProviderForm()
     providers = Provider.objects.order_by("-created_at")
+
     return render(request, TEMPLATE, {
         "page_title": "System settings",
         "active": "settings",
         "settings_section": "providers",
         "form": form,
         "providers": providers,
+    })
+
+
+# Crear proveedores
+@login_required(login_url="login")
+@require_http_methods(["POST"])
+def providers_create(request):
+    try:
+        data = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "ok": False,
+            "message": "Solicitud inválida."
+        }, status=400)
+
+    form = ProviderForm(data)
+
+    if not form.is_valid():
+        return JsonResponse({
+            "ok": False,
+            "message": "No se pudo guardar. Revisa los campos marcados.",
+            "errors": form.errors,
+        }, status=400)
+
+    p = form.save()
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_SETTINGS,
+        action="provider_created",
+        description=f"Se registró el proveedor {p}",
+        level=ActivityLog.LEVEL_SUCCESS,
+        obj=p,
+        metadata={
+            "contact": p.contact,
+        },
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "message": f"Proveedor '{p}' creado correctamente.",
+        "provider": {
+            "id": p.id,
+            "first_name": p.first_name,
+            "last_name": p.last_name,
+            "contact": p.contact,
+            "created_at": p.created_at.strftime("%Y-%m-%d %H:%M"),
+        }
+    })
+
+
+# Editar proveedores
+@login_required(login_url="login")
+@require_http_methods(["POST"])
+def providers_update(request, pk):
+    provider = get_object_or_404(Provider, pk=pk)
+
+    try:
+        data = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "ok": False,
+            "message": "Solicitud inválida."
+        }, status=400)
+
+    old_data = {
+        "first_name": provider.first_name,
+        "last_name": provider.last_name,
+        "contact": provider.contact,
+    }
+
+    form = ProviderForm(data, instance=provider)
+
+    if not form.is_valid():
+        return JsonResponse({
+            "ok": False,
+            "message": "No se pudo actualizar. Revisa los campos marcados.",
+            "errors": form.errors,
+        }, status=400)
+
+    provider = form.save()
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_SETTINGS,
+        action="provider_updated",
+        description=f"Se actualizó el proveedor {provider}",
+        level=ActivityLog.LEVEL_INFO,
+        obj=provider,
+        metadata={
+            "before": old_data,
+            "after": {
+                "first_name": provider.first_name,
+                "last_name": provider.last_name,
+                "contact": provider.contact,
+            },
+        },
+    )
+
+    return JsonResponse({
+        "ok": True,
+        "message": f"Proveedor '{provider}' actualizado correctamente.",
+        "provider": {
+            "id": provider.id,
+            "first_name": provider.first_name,
+            "last_name": provider.last_name,
+            "contact": provider.contact,
+        }
+    })
+
+
+# Borrar proveedores
+@login_required(login_url="login")
+@require_http_methods(["POST"])
+def providers_delete(request, pk):
+    provider = get_object_or_404(Provider, pk=pk)
+    provider_name = str(provider)
+
+    log_activity(
+        request=request,
+        module=ActivityLog.MODULE_SETTINGS,
+        action="provider_deleted",
+        description=f"Se eliminó el proveedor {provider_name}",
+        level=ActivityLog.LEVEL_WARNING,
+        obj=provider,
+        metadata={
+            "first_name": provider.first_name,
+            "last_name": provider.last_name,
+            "contact": provider.contact,
+        },
+    )
+
+    provider.delete()
+
+    return JsonResponse({
+        "ok": True,
+        "message": f"Proveedor '{provider_name}' eliminado correctamente."
     })
 
 
@@ -439,17 +554,8 @@ def quality_batch_detail(request, batch_id: int):
 
 ## ===== Inicio: Camera streaming (MJPEG) =====
 
-# Selector simple:
-# - type="device": usa índice de cámara (Iriun / webcam USB)
-# - type="rtsp": (GoPro) -> COMENTADO por ahora
-CAMERA_SOURCES = {
-    "cam1": {"type": "device", "index": 1},  # Iriun (teléfono) - cambia 0/1/2 según tu PC
-    "cam2": {"type": "device", "index": 0},  # webcam (mañana probablemente)
-    # "cam_gopro": {"type": "rtsp", "url": "rtsp://192.168.100.10:8554/live/gopro"},  # GoPro
-}
-
-def _mjpeg_generator(cam_id: str, source: dict):
-    worker = get_camera_worker(cam_id, source)
+def _mjpeg_generator(cam_id: str, sources: list[dict]):
+    worker = get_camera_worker(cam_id, sources)
 
     while True:
         frame = worker.get_frame()
@@ -470,13 +576,13 @@ def _mjpeg_generator(cam_id: str, source: dict):
 
 @login_required(login_url="login")
 def camera_stream(request, cam_id: str):
-    src = CAMERA_SOURCES.get(cam_id)
+    sources = settings.CAMERA_SOURCES.get(cam_id)
 
-    if not src:
+    if not sources:
         return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=404)
 
     return StreamingHttpResponse(
-        _mjpeg_generator(cam_id, src),
+        _mjpeg_generator(cam_id, sources),
         content_type="multipart/x-mixed-replace; boundary=frame"
     )
 
@@ -503,8 +609,8 @@ def live_annotated_stream(request, cam_id: str):
     if not sess or sess.status()["state"] not in ("running", "finished"):
         return JsonResponse({"ok": False, "error": "No hay sesión activa."}, status=404)
 
-    src = CAMERA_SOURCES.get(cam_id)
-    worker = get_camera_worker(cam_id, src) if src else None
+    sources = settings.CAMERA_SOURCES.get(cam_id)
+    worker = get_camera_worker(cam_id, sources) if sources else None
 
     def gen():
         while True:
@@ -556,7 +662,6 @@ def live_start(request):
 
     batch = get_object_or_404(Batch, pk=batch_id)
 
-    # No duplicar evaluación guardada
     if hasattr(batch, "evaluation"):
         ev = batch.evaluation
         return JsonResponse({
@@ -570,8 +675,8 @@ def live_start(request):
             "counts": ev.counts,
         })
 
-    src = CAMERA_SOURCES.get(cam_id)
-    if not src:
+    sources = settings.CAMERA_SOURCES.get(cam_id)
+    if not sources:
         create_camera_error_alert(
             message=f"La cámara {cam_id} no está configurada en el sistema.",
             batch=batch,
@@ -583,28 +688,23 @@ def live_start(request):
         )
         return JsonResponse({"ok": False, "error": "Cámara no configurada."}, status=400)
 
-    # GoPro deshabilitada por ahora
-    if src.get("type") == "rtsp":
-        return JsonResponse({"ok": False, "error": "GoPro deshabilitada por ahora."}, status=400)
-
-    # crea / reinicia sesión
     old = LIVE_SESSIONS.get(cam_id)
     if old:
         try:
             old.stop()
-        except:
+        except Exception:
             pass
 
     sess = LiveEvalSession(
         cam_id=cam_id,
-        source_config=src,
+        source_config=sources[0],
         duration_s=30,
         conf_display=0.25,
         conf_count=0.40,
         # min_frames_confirm=6,
         tracker_cfg="bytetrack.yaml",
     )
-    sess.batch_id = int(batch.id)  # amarra la sesión al lote
+    sess.batch_id = int(batch.id)
 
     LIVE_SESSIONS[cam_id] = sess
 
@@ -646,10 +746,16 @@ def live_start(request):
         metadata={
             "camera": cam_id,
             "duration_s": 30,
+            "active_source": sources[0].get("name"),
         },
     )
 
-    return JsonResponse({"ok": True, "state": "running", "cam_id": cam_id, "duration_s": 30})
+    return JsonResponse({
+        "ok": True,
+        "state": "running",
+        "cam_id": cam_id,
+        "duration_s": 30,
+    })
 
 
 @login_required(login_url="login")
