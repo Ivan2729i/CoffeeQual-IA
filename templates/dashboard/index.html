@@ -59,6 +59,17 @@
         <span class="text-sm font-medium">Quality Assessment</span>
       </a>
 
+      <a href="{% url 'dashboard:aroma' %}"
+         class="flex items-center px-6 py-3 transition-colors
+         {% if active == 'aroma' %}bg-white/10 border-l-[3px] border-[#c0895e] text-white
+         {% else %}text-[#d5c2b5] hover:text-white hover:bg-white/5{% endif %}">
+        <svg class="w-5 h-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M8 17c0-2 2-2 2-4s-2-2-2-4m6 8c0-2 2-2 2-4s-2-2-2-4M5 19h14" />
+        </svg>
+        <span class="text-sm font-medium">Aroma Analysis</span>
+      </a>
+
       <a href="{% url 'dashboard:batch' %}"
          class="flex items-center px-6 py-3 transition-colors
          {% if active == 'batch' %}bg-white/10 border-l-[3px] border-[#c0895e] text-white
@@ -191,6 +202,10 @@
         {% else %}
           {% include "dashboard/quality/home.html" %}
         {% endif %}
+
+      {# AROMA ANALYSIS #}
+      {% elif active == "aroma" %}
+        {% include "dashboard/aroma/home.html" %}
 
       {# BATCH METRICS #}
       {% elif active == "batch" %}

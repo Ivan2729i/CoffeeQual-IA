@@ -17,6 +17,7 @@ urlpatterns = [
     path("quality/", views.quality_home, name="quality"),
     path("quality/evaluate/", views.evaluate_image, name="quality_evaluate"),
     path("quality/batch/<int:batch_id>/", views.quality_batch_detail, name="quality_batch_detail"),
+    path("aroma/", views.aroma_view, name="aroma"),
     path("batch/", views.batch_metrics_view, name="batch"),
     path("api/batch-metrics/summary/", views.batch_metrics_summary_api, name="batch_metrics_summary_api"),
     path("packaging/", views.packaging_view, name="packaging"),
